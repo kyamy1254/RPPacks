@@ -1,0 +1,40 @@
+# ==========================================
+# RascraftPluginPacks Language File
+# ==========================================
+
+prefix: "&6[RPPacks] &r"
+
+# --- GUI Settings ---
+trail-menu-title: "&0足あとエフェクト設定 [Page {page}]"
+trail-item-vip-prefix: "&6★"
+trail-item-common-prefix: "&b≫"
+trail-status-equipped: "&a ● 現在装備中"
+trail-status-click: "&e クリックで装備！"
+remove-effect-button: "&cエフェクトを解除"
+
+# --- Common Messages ---
+no-permission: "&c権限がありません。"
+player-only: "&cこのコマンドはプレイヤーのみ実行可能です。"
+player-not-found: "&cプレイヤーが見つかりません。"
+reload-success: "&a設定を再読み込みしました。"
+invalid-number: "&c有効な数値を入力してください。"
+
+# --- SneakGrow Messages ---
+sneakgrow-enabled: "&aSneakGrow 機能を有効にしました。"
+sneakgrow-disabled: "&cSneakGrow 機能を無効にしました。"
+sneakgrow-set: "&f{type} &aを &f{value} &aに設定しました。"
+
+# --- Trail Messages ---
+trail-enabled: "&a足あとエフェクトを有効にしました。"
+trail-disabled: "&c足あとエフェクトを無効にしました。"
+trail-equip: "&aエフェクト &f{effect} &aを装備しました！"
+trail-remove: "&eエフェクトを解除しました。"
+trail-vip-required: "&cこのエフェクトを使用するにはVIP権限が必要です。"
+
+# --- TpEffect Messages ---
+tpeffect-enabled: "&aテレポートエフェクトを有効にしました。"
+tpeffect-disabled: "&cテレポートエフェクトを無効にしました。"
+
+# --- Admin Status / Check Messages ---
+# これらは RasPluginCommand 内で直接装飾して呼び出されるため
+# 項目名のみの定義や追加が必要な場合に使用します

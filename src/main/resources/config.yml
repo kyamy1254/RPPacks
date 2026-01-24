@@ -1,0 +1,170 @@
+# ================================================================
+# RPPacks - General Configuration
+# ================================================================
+
+# --- Sneak Grow (スニーク成長機能) ---
+# 作物の近くでスニークすると成長を促進します。
+sneak-grow:
+  enabled: true
+  success-chance: 0.8  # 成功確率 (0.0 ～ 1.0)
+  radius: 1            # 影響範囲の半径 (1 = 3x3)
+
+  # 成長方式の定義
+  # AGEABLE: 段階的に成長 (小麦等)
+  # STACK: 上に伸びる (サトウキビ等)
+  # BONEMEAL: 骨粉効果を適用 (苗木等)
+  growable-blocks:
+    # 段階的成長
+    WHEAT: AGEABLE
+    CARROTS: AGEABLE
+    POTATOES: AGEABLE
+    BEETROOTS: AGEABLE
+    COCOA: AGEABLE
+    NETHER_WART: AGEABLE
+
+    # スタック成長
+    SUGAR_CANE: STACK
+    CACTUS: STACK
+
+    # 骨粉効果
+    OAK_SAPLING: BONEMEAL
+    SPRUCE_SAPLING: BONEMEAL
+    BIRCH_SAPLING: BONEMEAL
+    JUNGLE_SAPLING: BONEMEAL
+    ACACIA_SAPLING: BONEMEAL
+    DARK_OAK_SAPLING: BONEMEAL
+    CHERRY_SAPLING: BONEMEAL
+    BAMBOO: BONEMEAL
+    BAMBOO_SAPLING: BONEMEAL
+    MELON_STEM: BONEMEAL
+    MOSS_BLOCK: BONEMEAL
+    AZALEA: BONEMEAL
+    FLOWERING_AZALEA: BONEMEAL
+    ROOTED_DIRT: BONEMEAL
+    CRIMSON_FUNGUS: BONEMEAL
+    WARPED_FUNGUS: BONEMEAL
+    PINK_PETALS: BONEMEAL
+    PUMPKIN_STEM: BONEMEAL
+    WILDFLOWERS: BONEMEAL
+    KELP: BONEMEAL
+
+# --- Footprint Trail (足あとエフェクト機能) ---
+footprint-trail:
+  density: 2    # デフォルトの密度
+  interval: 0.2 # エフェクト発生の移動間隔
+
+  # 一般プレイヤーが使用可能なエフェクト
+  # 書式: エフェクト名 または エフェクト名:密度
+  allowed-effects:
+    - FLAME:2
+    - VILLAGER_HAPPY:5
+    - CLOUD
+    - SNOWBALL:3
+    - ENCHANTMENT_TABLE:7
+
+  # VIP権限 (rppacks.vip) が必要なエフェクト
+  vip-effects:
+    - HEART:1
+    - TOTEM:1
+    - DRAGON_BREATH:3
+    - SOUL_FIRE_FLAME:2
+    - GLOW
+    - PORTAL:4
+    - WITCH:2
+    - LAVA:2
+    - WAX_ON
+    - END_ROD
+    - INSTANT_EFFECT
+    - SPLASH:5
+    - SQUID_INK
+    - ELECTRIC_SPARK
+
+  # 特殊設定（カラー指定等）が必要なエフェクト
+  colored-effects:
+    REDSTONE_DUST:
+      particle: "DUST"
+      color: "#FF0000"
+      size: 1.0
+      density: 3
+    GOLD_DUST:
+      particle: "DUST"
+      color: "#e6b422"
+      size: 1.5
+      density: 5
+
+  # GUIメニューで表示されるアイコンの設定
+  icons:
+    CLOUD: "FEATHER"
+    DRAGON_BREATH: "DRAGON_BREATH"
+    ENCHANTMENT_TABLE: "ENCHANTING_TABLE"
+    END_ROD: "END_ROD"
+    FLAME: "CAMPFIRE"
+    GLOW: "GLOW_INK_SAC"
+    GOLD_DUST: "GOLD_NUGGET"
+    GREEN_NOTE: "JUKEBOX"
+    HEART: "POPPY"
+    LAVA: "LAVA_BUCKET"
+    MELODY_GREEN: "NOTE_BLOCK"
+    PORTAL: "ENDER_PEARL"
+    REDSTONE_DUST: "REDSTONE"
+    SNOWBALL: "SNOWBALL"
+    SOUL_FIRE_FLAME: "SOUL_CAMPFIRE"
+    TOTEM: "TOTEM_OF_UNDYING"
+    VILLAGER_HAPPY: "EMERALD"
+    WAX_ON: "HONEYCOMB"
+    WITCH: "WITCH_SPAWN_EGG"
+    DEFAULT: "FIREWORK_STAR"
+
+# --- Sound Settings ---
+# 各アクション時の効果音設定
+# サウンド名一覧: https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Sound.html
+# ※ "block.note_block.iron_xylophone" のようなドット形式を推奨します。
+sounds:
+  gui:
+    # エフェクト装備成功時
+    equip-success:
+      name: "entity.experience_orb.pickup"
+      volume: 1.0
+      pitch: 1.0
+    # 権限不足などで失敗した時
+    equip-fail:
+      name: "entity.villager.no"
+      volume: 1.0
+      pitch: 1.0
+    # ページ移動クリック時
+    page-change:
+      name: "item.book.page_turn"
+      volume: 1.0
+      pitch: 1.0
+    # エフェクトを解除（BARRIERクリック）した時
+    effect-off:
+      name: "block.note_block.iron_xylophone"
+      volume: 1.0
+      pitch: 0.75
+
+# --- Teleport Effect Settings ---
+teleport-effect:
+  enabled: true
+  # 実行までの遅延（ティック単位）。長距離ワープで表示されない場合は増やす（10L = 0.5秒）
+  delay-ticks: 10
+  # 使用するパーティクルの名前（Minecraftの識別子）
+  # ワープ元: 離脱時のエフェクト
+  from-particle: "trial_spawner_detection"
+  # ワープ先: 到着時のエフェクト
+  to-particle: "trial_spawner_detection_ominous"
+
+  features:
+    # ダメージ・回復インジケーターの設定
+    damage-indicator:
+      enabled: true        # インジケーター全体の有効化/無効化
+      share-continuous-damage:
+        enabled: true
+        range: 16.0
+      # ※表示ロジックは統合済み：攻撃/回復を与えた本人にのみ表示されます
+
+    # アクションバーHPゲージの設定
+    health-bar:
+      enabled: true        # HPゲージ全体の有効化/無効化
+      view-distance: 96.0   # 視線判定（RayTrace）でMOBを認識する距離
+      display-ticks: 15    # 攻撃後にゲージを維持する時間 (20ticks = 1秒)
+

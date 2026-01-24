@@ -1,0 +1,32 @@
+name: RPPacks
+version: 1.1.2
+main: net.akabox.rascraft.RascraftPluginPacks # ★ パッケージ名とメインクラス名を完全指定
+api-version: 1.21.8 # ターゲットとするMinecraftのメジャーバージョンに合わせることを推奨
+author: Kyamy
+description: Made for RAScraft. RAScraft Original Packs.
+commands:
+  rppacks:
+    description: Rascraft Plugin Packsの管理コマンド
+    usage: /rasplugin <機能> <アクション>
+    permission-message: 権限がありません。
+    aliases: [ rpp ]
+permissions:
+  rppacks.trail:
+    description: 足あとメニューを開く権限
+    default: true
+  rascraft.sneakgrow:
+    description: スニーク成長を使用する権限
+    default: true
+  rppacks.vip:
+    description: VIP限定エフェクトを使用する権限
+    default: op
+  rppacks.admin:
+    description: 管理者用コマンドを使用する権限
+    default: op
+  rppacks.*:
+    description: 全ての権限
+    children:
+      rppacks.trail: true
+      rascraft.sneakgrow: true
+      rppacks.vip: true
+      rppacks.admin: true
