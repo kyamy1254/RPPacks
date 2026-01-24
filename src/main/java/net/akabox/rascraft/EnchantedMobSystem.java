@@ -42,61 +42,98 @@ public class EnchantedMobSystem implements Listener {
         }
     }
 
+    private final java.util.Map<org.bukkit.block.Block, Integer> activeBlocks = new java.util.HashMap<>();
+
     public void makeEnchanted(Monster monster) {
         monster.getPersistentDataContainer().set(enchantedKey, PersistentDataType.BYTE, (byte) 1);
 
-        EntityEquipment equip = monster.getEquipment();
-        if (equip != null) {
-            // 1. 防具の設定 (鉄装備)
-            ItemStack helmet = new ItemStack(Material.IRON_HELMET);
-            ItemStack chest = new ItemStack(Material.IRON_CHESTPLATE);
-            helmet.addUnsafeEnchantment(Enchantment.VANISHING_CURSE, 1);
-            chest.addUnsafeEnchantment(Enchantment.VANISHING_CURSE, 1);
-            equip.setHelmet(helmet);
-            equip.setChestplate(chest);
-            equip.setHelmetDropChance(0f);
-            equip.setChestplateDropChance(0f);
-
-            // 2. 武器の決定
-            ItemStack weapon = null;
-
-            if (monster instanceof Zombie) {
-                double weaponRoll = random.nextDouble();
-                if (weaponRoll < 0.4) { // 40%の確率で特殊武器
-                    if (weaponRoll < 0.1) weapon = new ItemStack(Material.DIAMOND_SWORD);
-                    else if (weaponRoll < 0.2) weapon = new ItemStack(Material.IRON_AXE);
-                    else if (weaponRoll < 0.3) weapon = new ItemStack(Material.CROSSBOW);
-                    else weapon = new ItemStack(Material.IRON_SWORD);
-                }
-            } else if (monster instanceof Skeleton) {
-                weapon = new ItemStack(Material.BOW);
-            }
-
-            // 3. 武器の適用 (ここで一括処理することでスコープエラーを回避)
-            if (weapon != null) {
-                applyRandomEnchant(weapon);
-                equip.setItemInMainHand(weapon);
-                equip.setItemInMainHandDropChance(0.05f);
-            }
-        }
-        // ステータス強化
+        // 基本ステータス（HP・名前）の適用
         var hp = monster.getAttribute(Attribute.MAX_HEALTH);
         if (hp != null) {
-            hp.setBaseValue(hp.getBaseValue() * 2.5); // HP 2.5倍
+            hp.setBaseValue(hp.getBaseValue() * 2.5);
             monster.setHealth(hp.getBaseValue());
         }
-
         monster.setCustomName("§d§lEnchanted " + monster.getType().getName());
         monster.setCustomNameVisible(false);
 
-        if (monster instanceof Zombie || monster instanceof Skeleton) {
-            startClimbingAI(monster);
-            if (monster instanceof Zombie) {
-                startCommanderAura((Zombie) monster);
-            }
+        // 装備の設定
+        applyEnchantedEquipment(monster);
+
+        startCoreNavigationAI(monster);
+
+        // --- 種類別AIの有効化 (ここが統合のキモです) ---
+        if (monster instanceof Zombie zombie) {
+            startClimbingAI(zombie);    // 建築
+            startCommanderAura(zombie); // 指揮官
+            startLootingAI(zombie);     // 拾得
+        } else if (monster instanceof Skeleton skeleton) {
+            startClimbingAI(skeleton);  // 建築
+            startLootingAI(skeleton);   // 拾得
+            // ※偏差撃ちなどはEvent側で判定されるためタスク起動は不要
+        } else if (monster instanceof Creeper creeper) {
+            startBurstAI(creeper);      // 【追加】バースト突進
+        } else if (monster instanceof Spider spider) {
+            startLootingAI(spider);     // 拾得
+            // ※クモのWebTrap/飛びかかりはEvent/個体判定で処理
         }
 
-        // オーラエフェクト (Dungeons風)
+        // 共通オーラエフェクトの開始
+        startVisualAura(monster);
+    }
+
+    // コードの可読性のために装備処理を分離
+    private void applyEnchantedEquipment(Monster monster) {
+        EntityEquipment equip = monster.getEquipment();
+        if (equip == null) return;
+
+        // 鉄装備のセットアップ
+        ItemStack helmet = new ItemStack(Material.IRON_HELMET);
+        ItemStack chest = new ItemStack(Material.IRON_CHESTPLATE);
+        helmet.addUnsafeEnchantment(Enchantment.VANISHING_CURSE, 1);
+        chest.addUnsafeEnchantment(Enchantment.VANISHING_CURSE, 1);
+        equip.setHelmet(helmet);
+        equip.setChestplate(chest);
+        equip.setHelmetDropChance(0f);
+        equip.setChestplateDropChance(0f);
+
+        ItemStack weapon = null;
+        if (monster instanceof Zombie) {
+            double roll = random.nextDouble();
+            if (roll < 0.4) {
+                if (roll < 0.1) weapon = new ItemStack(Material.DIAMOND_SWORD);
+                else if (roll < 0.2) weapon = new ItemStack(Material.IRON_AXE);
+                else if (roll < 0.3) weapon = new ItemStack(Material.CROSSBOW);
+                else weapon = new ItemStack(Material.IRON_SWORD);
+            }
+        } else if (monster instanceof Skeleton) {
+            weapon = new ItemStack(Material.BOW);
+        }
+
+        if (weapon != null) {
+            applyRandomEnchant(weapon);
+            equip.setItemInMainHand(weapon);
+            equip.setItemInMainHandDropChance(0.05f);
+        }
+    }
+
+    private boolean isEnchanted(Entity entity) {
+        return entity.getPersistentDataContainer().has(enchantedKey, PersistentDataType.BYTE);
+    }
+
+    private void startVisualAura(Monster monster) {
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (!monster.isValid() || monster.isDead()) {
+                    cancel();
+                    return;
+                }
+                monster.getWorld().spawnParticle(Particle.WITCH, monster.getLocation().add(0, 1, 0), 1, 0.2, 0.4, 0.2, 0.01);
+            }
+        }.runTaskTimer(plugin, 0, 5);
+    }
+
+    private void startCoreNavigationAI(Monster monster) {
         new BukkitRunnable() {
             @Override
             public void run() {
@@ -105,13 +142,42 @@ public class EnchantedMobSystem implements Listener {
                     return;
                 }
 
-                monster.getWorld().spawnParticle(Particle.WITCH, monster.getLocation().add(0, 1, 0), 1, 0.2, 0.4, 0.2, 0.01);
-            }
-        }.runTaskTimer(plugin, 0, 5);
-    }
+                LivingEntity target = monster.getTarget();
 
-    private boolean isEnchanted(Entity entity) {
-        return entity.getPersistentDataContainer().has(enchantedKey, PersistentDataType.BYTE);
+                // --- A. 捜索範囲の拡大 (32〜48マス) ---
+                // バニラの16マス制限を突破し、より遠くのプレイヤーを検知
+                if (target == null || target.isDead() || !target.isValid()) {
+                    target = findExtendedTarget(monster, 40.0);
+                    if (target != null) monster.setTarget(target);
+                }
+
+                if (target == null) return;
+
+                // --- B. 経路の動的更新と移動速度の最適化 ---
+                double distance = monster.getLocation().distance(target.getLocation());
+
+                // 距離に応じて移動スタイルを変更
+                float speedMultiplier = 1.0f;
+                if (distance > 15) {
+                    speedMultiplier = 1.25f; // 遠距離では全力疾走
+                } else if (distance < 4) {
+                    speedMultiplier = 1.1f;  // 接敵時は慎重に接近
+                }
+
+                // バニラのPathfinderに目的地を再提示し続ける
+                // これにより、建築AIが置いたブロックを即座に「通れる道」と認識させる
+                monster.getPathfinder().moveTo(target, speedMultiplier);
+
+                // --- C. クモ専用：壁登りと索敵の同期 ---
+                if (monster instanceof Spider spider && distance < 10) {
+                    // ターゲットが自分より高い位置にいる場合、積極的に壁へ張り付く
+                    if (target.getLocation().getY() > spider.getLocation().getY()) {
+                        Vector toTarget = target.getLocation().toVector().subtract(spider.getLocation().toVector()).normalize();
+                        spider.setVelocity(spider.getVelocity().add(toTarget.multiply(0.1)));
+                    }
+                }
+            }
+        }.runTaskTimer(plugin, 0, 10); // 0.5秒ごとに脳を更新
     }
 
     // --- 2. スケルトンのAI強化 (偏差撃ち & バックステップ) ---
@@ -189,57 +255,52 @@ public class EnchantedMobSystem implements Listener {
         }
     }
 
+    // 拡張索敵メソッド
+    private LivingEntity findExtendedTarget(Monster monster, double range) {
+        return monster.getNearbyEntities(range, range / 2, range).stream()
+                .filter(e -> e instanceof Player p && p.getGameMode() == GameMode.SURVIVAL)
+                .map(e -> (LivingEntity) e)
+                .findFirst()
+                .orElse(null);
+    }
 
     // --- 3. ゾンビのAI強化 (呼び声 & 執念) ---
     @EventHandler
     public void onZombieAttack(EntityDamageByEntityEvent event) {
-        if (!(event.getDamager() instanceof Zombie zombie) || !isEnchanted(zombie)) return;
-        if (!(event.getEntity() instanceof Player player)) return;
+        // A. 強化ゾンビがプレイヤーを殴った場合
+        if (event.getDamager() instanceof Zombie zombie && isEnchanted(zombie)) {
+            if (event.getEntity() instanceof Player player) {
+                applyZombieSwarm(zombie, player);
+            }
+        }
 
-        // 「呼び声」: 周囲のゾンビをターゲットに集中させる
-        for (Entity nearby : zombie.getNearbyEntities(15, 7, 15)) {
-            if (nearby instanceof Zombie fellow) {
-                fellow.setTarget(player);
-                // 執念の加速バフ
-                var speed = fellow.getAttribute(Attribute.MOVEMENT_SPEED);
-                if (speed != null) {
-                    speed.setBaseValue(speed.getBaseValue() * 1.1);
-                }
+        // B. プレイヤーが強化ゾンビを殴った場合（これがないと、殴られた瞬間にターゲットが外れることがある）
+        if (event.getEntity() instanceof Zombie victim && isEnchanted(victim)) {
+            if (event.getDamager() instanceof Player player) {
+                applyZombieSwarm(victim, player);
             }
         }
     }
 
-    @EventHandler
-    public void onZombieLowHP(EntityDamageEvent event) {
-        if (!(event.getEntity() instanceof Zombie zombie) || !isEnchanted(zombie)) return;
-        if (reinforcedEntities.contains(zombie.getUniqueId())) return;
+    private void applyZombieSwarm(Zombie leadZombie, Player target) {
+        // 1. 本人も確実にターゲットを追わせる
+        leadZombie.setTarget(target);
 
-        if (zombie.getHealth() - event.getFinalDamage() <= 10.0) {
-            reinforcedEntities.add(zombie.getUniqueId());
-            zombie.getWorld().spawnParticle(Particle.ANGRY_VILLAGER, zombie.getLocation().add(0, 1, 0), 10, 0.5, 0.5, 0.5, 0.1);
+        // 2. 周囲のゾンビを呼ぶ
+        for (Entity nearby : leadZombie.getNearbyEntities(15, 7, 15)) {
+            if (nearby instanceof Zombie fellow) {
+                fellow.setTarget(target);
 
-            for (int i = 0; i < 3; i++) {
-                double offsetX = (random.nextDouble() - 0.5) * 3;
-                double offsetZ = (random.nextDouble() - 0.5) * 3;
+                /* * ポーション効果による加速バフ
+                 * 移動速度上昇 I (Lv1) を 10秒間 (200 ticks) 付与。
+                 * 既にバフがある場合は時間がリフレッシュされるだけで、速度は蓄積されない。
+                 */
+                fellow.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 200, 0, false, true, true));
 
-                zombie.getWorld().spawn(zombie.getLocation().add(offsetX, 0, offsetZ), Zombie.class, fellow -> {
-                    fellow.setCustomName("§7Reinforcement");
-                    // ターゲットを親ゾンビと同期
-                    if (zombie.getTarget() != null) {
-                        fellow.setTarget(zombie.getTarget());
-                    }
-
-                    // 増援用の装備（革のヘルメットとチェストプレート）
-                    EntityEquipment fellowEquip = fellow.getEquipment();
-                    if (fellowEquip != null) {
-                        fellowEquip.setHelmet(new ItemStack(Material.LEATHER_HELMET));
-                        fellowEquip.setChestplate(new ItemStack(Material.LEATHER_CHESTPLATE));
-
-                        // 増援の装備はドロップしないように設定
-                        fellowEquip.setHelmetDropChance(0.0f);
-                        fellowEquip.setChestplateDropChance(0.0f);
-                    }
-                });
+                // 仲間が反応した視覚演出
+                if (random.nextDouble() < 0.2) {
+                    fellow.getWorld().spawnParticle(Particle.ANGRY_VILLAGER, fellow.getLocation().add(0, 2, 0), 1);
+                }
             }
         }
     }
@@ -424,9 +485,61 @@ public class EnchantedMobSystem implements Listener {
         creeper.getWorld().playSound(loc, Sound.ENTITY_DRAGON_FIREBALL_EXPLODE, 1f, 0.5f);
     }
 
-    // --- 10. アンデッドの建築AI (高所のプレイヤーを追う) ---
+    @EventHandler
+    public void onZombieLowHP(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Zombie zombie) || !isEnchanted(zombie)) return;
+
+        // 既に増援を呼んだ個体は除外（一回限りの制限）
+        if (reinforcedEntities.contains(zombie.getUniqueId())) return;
+
+        // 現在の体力からダメージを引いた値が 10.0 以下かチェック
+        if (zombie.getHealth() - event.getFinalDamage() <= 10.0) {
+
+            // 攻撃を受けるたびに 25% の確率で発動
+            if (random.nextDouble() < 0.25) {
+
+                // 発動フラグを立てる（一回限り）
+                reinforcedEntities.add(zombie.getUniqueId());
+
+                // 演出
+                zombie.getWorld().spawnParticle(Particle.ANGRY_VILLAGER, zombie.getLocation().add(0, 1, 0), 10, 0.5, 0.5, 0.5, 0.1);
+                zombie.getWorld().playSound(zombie.getLocation(), Sound.ENTITY_ZOMBIE_INFECT, 1.0f, 0.5f);
+
+                // 3体の増援を召喚
+                for (int i = 0; i < 3; i++) {
+                    double offsetX = (random.nextDouble() - 0.5) * 3;
+                    double offsetZ = (random.nextDouble() - 0.5) * 3;
+
+                    zombie.getWorld().spawn(zombie.getLocation().add(offsetX, 0, offsetZ), Zombie.class, fellow -> {
+                        fellow.setCustomName("§7Reinforcement");
+
+                        // ターゲットを親ゾンビと同期
+                        if (zombie.getTarget() != null) {
+                            fellow.setTarget(zombie.getTarget());
+                        }
+
+                        // 増援用の装備
+                        EntityEquipment fellowEquip = fellow.getEquipment();
+                        if (fellowEquip != null) {
+                            fellowEquip.setHelmet(new ItemStack(Material.LEATHER_HELMET));
+                            fellowEquip.setChestplate(new ItemStack(Material.LEATHER_CHESTPLATE));
+                            fellowEquip.setHelmetDropChance(0.0f);
+                            fellowEquip.setChestplateDropChance(0.0f);
+                        }
+
+                        // 増援にも「呼び声（加速ポーション）」などのAIが適用されるように
+                        // 必要に応じてここで basic stats などを設定しても良いでしょう
+                    });
+                }
+            }
+        }
+    }
+
     private void startClimbingAI(Monster monster) {
         new BukkitRunnable() {
+            private Location lastLoc = monster.getLocation();
+            private int stuckTicks = 0;
+
             @Override
             public void run() {
                 if (!monster.isValid() || monster.isDead()) {
@@ -439,49 +552,97 @@ public class EnchantedMobSystem implements Listener {
 
                 Location mLoc = monster.getLocation();
                 Location tLoc = target.getLocation();
-                double distance = mLoc.distance(tLoc);
 
-                // 射程圏内かつ高低差がある場合
-                if (distance < 12 && tLoc.getY() - mLoc.getY() > 1.0) {
-                    // プレイヤー方向への水平ベクトルを取得
-                    Vector direction = tLoc.toVector().subtract(mLoc.toVector()).setY(0).normalize();
+                // 【活用】水平距離(XZ)と垂直差(Y)
+                double distH = Math.sqrt(Math.pow(mLoc.getX() - tLoc.getX(), 2) + Math.pow(mLoc.getZ() - tLoc.getZ(), 2));
+                double diffY = tLoc.getY() - mLoc.getY();
 
-                    // 「一歩先」の座標を計算 (0.8ブロック先)
-                    Location frontLoc = mLoc.clone().add(direction.multiply(0.8));
+                // 1. スタック検知（移動が止まっているかチェック）
+                if (mLoc.distance(lastLoc) < 0.1) {
+                    stuckTicks++;
+                } else {
+                    stuckTicks = 0;
+                }
+                lastLoc = mLoc.clone();
 
-                    // 設置候補：足元(Y+0)、膝(Y+1)
-                    for (int yOffset = 0; yOffset <= 1; yOffset++) {
-                        org.bukkit.block.Block targetBlock = frontLoc.clone().add(0, yOffset, 0).getBlock();
+                // 2. 移動指示
+                monster.getPathfinder().moveTo(target, 1.2);
 
-                        if (targetBlock.getType() == Material.AIR) {
-                            // 足場を設置
-                            placeTemporaryBlock(targetBlock);
+                // 3. 高度同期（プレイヤーと同じ高さなら建築しない）
+                if (diffY < 0.5) return;
 
-                            // 登攀を補助するベクトル（斜め上へ押し出す）
-                            Vector velocity = direction.clone().multiply(0.25).setY(0.45);
-                            monster.setVelocity(velocity);
-                            break; // 1つ置いたらこのティックは終了
+                // --- 4. 建築ロジックの分岐 ---
+                Vector dir = tLoc.toVector().subtract(mLoc.toVector()).setY(0).normalize();
+
+                // A: 【橋渡し】プレイヤーと水平距離がある場合 (distH > 1.5)
+                if (distH > 1.5) {
+                    for (double d = 0.8; d <= 1.5; d += 0.7) {
+                        Location checkLoc = mLoc.clone().add(dir.clone().multiply(d));
+                        org.bukkit.block.Block bridgeBlock = checkLoc.getBlock().getRelative(0, -1, 0);
+
+                        if (bridgeBlock.getType() == Material.AIR) {
+                            refreshTemporaryBlock(bridgeBlock);
+                            // 橋を架けたら少し前進を促す
+                            monster.setVelocity(monster.getVelocity().add(dir.multiply(0.1)));
+                            break;
                         }
                     }
                 }
+
+                // B: 【垂直縦積み】プレイヤーのほぼ真下にいる場合 (distH <= 1.5)
+                // または、移動が完全に詰まっている場合
+                if (distH <= 1.5 || stuckTicks > 5) {
+                    org.bukkit.block.Block feet = mLoc.getBlock();
+                    if (feet.getType() == Material.AIR) {
+                        // 中心スナップ
+                        Location center = feet.getLocation().add(0.5, 0.1, 0.5);
+                        center.setDirection(mLoc.getDirection());
+                        monster.teleport(center);
+
+                        refreshTemporaryBlock(feet);
+                        monster.setVelocity(new Vector(0, 0.42, 0));
+                        stuckTicks = 0;
+                        return;
+                    }
+                }
+
+                // C: 【障害物乗り越え】目の前に壁がある場合
+                if (stuckTicks > 3) {
+                    org.bukkit.block.Block eyeLevel = mLoc.clone().add(dir.multiply(0.7)).getBlock().getRelative(0, 1, 0);
+                    if (eyeLevel.getType() == Material.AIR) {
+                        refreshTemporaryBlock(eyeLevel);
+                        monster.setVelocity(new Vector(0, 0.42, 0));
+                        stuckTicks = 0;
+                    }
+                }
             }
-        }.runTaskTimer(plugin, 0, 10); // 1秒(20)だと遅いので、0.5秒(10)に短縮
+        }.runTaskTimer(plugin, 0, 7);
     }
 
-    // ブロック設置と消去の共通メソッド（コードをスッキリさせるため分離）
-    private void placeTemporaryBlock(org.bukkit.block.Block block) {
-        block.setType(Material.MOSSY_COBBLESTONE);
-        block.getWorld().playSound(block.getLocation(), Sound.BLOCK_STONE_PLACE, 0.5f, 0.8f);
+    // ブロックを設置、または既存の消去タスクを上書きして延長するメソッド
+    private void refreshTemporaryBlock(org.bukkit.block.Block block) {
+        // すでにタスクがある場合はキャンセルしてタイマーをリセット
+        if (activeBlocks.containsKey(block)) {
+            Bukkit.getScheduler().cancelTask(activeBlocks.get(block));
+        } else {
+            // 新規設置の場合
+            block.setType(Material.MOSSY_COBBLESTONE);
+            block.getWorld().playSound(block.getLocation(), Sound.BLOCK_STONE_PLACE, 0.5f, 0.8f);
+        }
 
-        new BukkitRunnable() {
+        // 新しい消去タスクをスケジュール（5秒後）
+        int taskId = new BukkitRunnable() {
             @Override
             public void run() {
                 if (block.getType() == Material.MOSSY_COBBLESTONE) {
                     block.setType(Material.AIR);
                     block.getWorld().spawnParticle(Particle.BLOCK, block.getLocation().add(0.5, 0.5, 0.5), 10, 0.2, 0.2, 0.2, Material.MOSSY_COBBLESTONE.createBlockData());
                 }
+                activeBlocks.remove(block);
             }
-        }.runTaskLater(plugin, 100); // 5秒後に消去
+        }.runTaskLater(plugin, 100).getTaskId();
+
+        activeBlocks.put(block, taskId);
     }
 
     // --- 11. 装備拾得AI (全モンスター対象) ---
