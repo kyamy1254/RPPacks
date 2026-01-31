@@ -35,6 +35,7 @@ public class EntityHealthSystem implements Listener {
     private final HashMap<UUID, Long> lastSentTime = new HashMap<>(); // アクションバー消失防止用
     private final DecimalFormat df = new DecimalFormat("0.0");
     private final Random random = new Random();
+    private org.bukkit.scheduler.BukkitTask rayTask = null;
 
     private final String[] gaugeLeft = new String[21];
     private final String[] gaugeRight = new String[21];
@@ -42,7 +43,8 @@ public class EntityHealthSystem implements Listener {
     public EntityHealthSystem(RascraftPluginPacks plugin) {
         this.plugin = plugin;
         precomputeGauges();
-        startRayTraceTask();
+        // 起動時は plugin のフラグに従ってタスクを開始
+        if (plugin.isEntityHealthEnabled()) startRayTraceTask();
     }
 
     private void precomputeGauges() {
@@ -62,7 +64,7 @@ public class EntityHealthSystem implements Listener {
     }
 
     private void startRayTraceTask() {
-        new BukkitRunnable() {
+        rayTask = new BukkitRunnable() {
             @Override
             public void run() {
                 double maxDistance = plugin.getHealthViewDistance();
@@ -92,6 +94,19 @@ public class EntityHealthSystem implements Listener {
                 }
             }
         }.runTaskTimer(plugin, 0L, 4L);
+    }
+
+    public void disable() {
+        if (rayTask != null) {
+            rayTask.cancel();
+            rayTask = null;
+        }
+        org.bukkit.event.HandlerList.unregisterAll(this);
+    }
+
+    public void enable() {
+        // リスナー登録は外側で行われることを想定
+        if (rayTask == null) startRayTraceTask();
     }
 
 

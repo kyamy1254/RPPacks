@@ -50,9 +50,18 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
                 if (checkAdmin(sender)) sendStatus(sender);
                 return true;
             }
+            case "enchantedmobs" -> {
+                if (checkAdmin(sender)) handleEnchantedMobs(sender, label, args);
+                return true;
+            }
+            case "entityhealth" -> {
+                if (checkAdmin(sender)) handleEntityHealth(sender, label, args);
+                return true;
+            }
             case "reload" -> {
                 if (checkAdmin(sender)) {
-                    plugin.loadConfiguration();
+                    plugin.reloadPlugin();
+                    if (plugin.getMobSystem() != null) plugin.getMobSystem().reloadConfiguration();
                     sender.sendMessage(plugin.getMessage("reload-success"));
                 }
                 return true;
@@ -183,6 +192,28 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(msg);
     }
 
+    private void handleEnchantedMobs(CommandSender sender, String label, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.RED + "使用法: /" + label + " enchantedmobs <enable|disable>");
+            return;
+        }
+        boolean enable = args[1].equalsIgnoreCase("enable");
+        plugin.setEnchantedMobsEnabled(enable);
+        String msg = enable ? plugin.getMessage("enchantedmobs-enabled") : plugin.getMessage("enchantedmobs-disabled");
+        sender.sendMessage(msg);
+    }
+
+    private void handleEntityHealth(CommandSender sender, String label, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.RED + "使用法: /" + label + " entityhealth <enable|disable>");
+            return;
+        }
+        boolean enable = args[1].equalsIgnoreCase("enable");
+        plugin.setEntityHealthEnabled(enable);
+        String msg = enable ? plugin.getMessage("entityhealth-enabled") : plugin.getMessage("entityhealth-disabled");
+        sender.sendMessage(msg);
+    }
+
     private void handleSpawnEnchanted(CommandSender sender, String[] args) {
         // 1. 実行者がプレイヤーかチェックし、変数 'player' を確定させる
         if (!(sender instanceof Player player)) {
@@ -225,7 +256,7 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
         if (args.length == 1) {
             List<String> subs = new ArrayList<>(Arrays.asList("trail", "help", "version"));
             if (sender.hasPermission("rppacks.admin")) {
-                subs.addAll(Arrays.asList("status", "reload", "sneakgrow", "tpeffect"));
+                subs.addAll(Arrays.asList("status", "reload", "sneakgrow", "tpeffect", "enchantedmobs", "entityhealth"));
             }
             return StringUtil.copyPartialMatches(args[0], subs, new ArrayList<>());
         }
@@ -262,6 +293,9 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
             if (sub.equals("tpeffect")) {
                 if (args.length == 2)
                     return StringUtil.copyPartialMatches(args[1], Arrays.asList("enable", "disable"), new ArrayList<>());
+            }
+            if (sub.equals("enchantedmobs") || sub.equals("entityhealth")) {
+                if (args.length == 2) return StringUtil.copyPartialMatches(args[1], Arrays.asList("enable", "disable"), new ArrayList<>());
             }
             if (sub.equals("spawn")) {
                 if (args.length == 2) {
@@ -356,6 +390,8 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
             help.add(ChatColor.GOLD + "/" + label + " trail check <player>");
             help.add(ChatColor.GOLD + "/" + label + " trail <player> <trail|off>");
             help.add(ChatColor.GOLD + "/" + label + " tpeffect <enable|disable>");
+            help.add(ChatColor.GOLD + "/" + label + " enchantedmobs <enable|disable>");
+            help.add(ChatColor.GOLD + "/" + label + " entityhealth <enable|disable>");
             help.add(ChatColor.GOLD + "/" + label + " reload " + ChatColor.GRAY + ": 設定再読み込み");
         }
         sendStyledMsg(s, "コマンドヘルプ", help);
@@ -388,6 +424,12 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
                 "",
                 ChatColor.YELLOW + "[ TP Effect ]",
                 ChatColor.GRAY + " » 状態: " + (plugin.isTpEffectEnabled() ? "§a有効" : "§c無効")
+                ,"",
+                ChatColor.AQUA + "[ Enchanted Mobs ]",
+                ChatColor.GRAY + " » 状態: " + (plugin.isEnchantedMobsEnabled() ? "§a有効" : "§c無効"),
+                "",
+                ChatColor.AQUA + "[ Entity Health System ]",
+                ChatColor.GRAY + " » 状態: " + (plugin.isEntityHealthEnabled() ? "§a有効" : "§c無効")
         ));
     }
 

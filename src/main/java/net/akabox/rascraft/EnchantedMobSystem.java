@@ -7,6 +7,7 @@ import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.*;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.*;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemStack;
@@ -16,88 +17,626 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
+import org.bukkit.inventory.meta.ArmorMeta;
+import org.bukkit.inventory.meta.trim.ArmorTrim;
+import org.bukkit.inventory.meta.trim.TrimMaterial;
+import org.bukkit.inventory.meta.trim.TrimPattern;
 
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.List;
+
 
 public class EnchantedMobSystem implements Listener {
     private final RascraftPluginPacks plugin;
     private final NamespacedKey enchantedKey;
     private final Random random = new Random();
-    private final java.util.Set<java.util.UUID> reinforcedEntities = new java.util.HashSet<>();
+    private final NamespacedKey reinforcedKey;
+    private final java.util.Map<Location, Integer> activeBlocks = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<Location, java.util.UUID> occupiedBlocks = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<java.util.UUID, java.util.List<Integer>> mobTasks = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // === Configuration values (config.yml から読み込み) ===
+    // スポーン時Enchanted化確率
+    public double enchantedSpawnChance;
+    // ステータス
+    public double hpMultiplier;
+    public double movementSpeed;
+    // パーティクル
+    public int auraUpdateInterval;
+    public double spiralAngleIncrement;
+    public double spiralRadius;
+    // ナビゲーション
+    public double detectionRange;
+    public double baseSpeed;
+    public double farDistanceThreshold;
+    public double farDistanceSpeed;
+    public double closeDistanceThreshold;
+    public double closeDistanceSpeed;
+    public int stuckTicksThreshold;
+    public double stuckJumpPower;
+    public double stuckJumpHorizontal;
+    // スケルトン
+    public double arrowSpeedMultiplier;
+    public double homingArrowChance;
+    public double homingArrowSpeed;
+    // ゾンビ
+    public double commanderAuraRange;
+    public double commanderAuraHeight;
+    public int swarmAuraInterval;
+    public double swarmDetectionRange;
+    public double reinforcementHpThreshold;
+    public double reinforcementSpawnChance;
+    public int reinforcementCountMin;
+    public int reinforcementCountMax;
+    public double enchantedReinforcementChance;
+    public double reinforcementSpawnDistance;
+    // クリーパー
+    public double creeperBaseSpeed;
+    public double creeperBackstabSpeed;
+    public double creeperSidestepForce;
+    public double creeperVisibilityThreshold;
+    public double creeperVisionRange;
+    public double creeperBackstabDistance;
+    public double creeperSidestepDistance;
+    public double creeperBurstMinDistance;
+    public double creeperBurstMaxDistance;
+    public double creeperBurstSpeed;
+    public double creeperBurstVerticalPower;
+    public int creeperBurstCooldown;
+    // クモ
+    public double spiderWallClimbForce;
+    public double spiderWallClimbVertical;
+    public double spiderWallClimbHeightDiff;
+    public double spiderLeapMinDistance;
+    public double spiderLeapMaxDistance;
+    public double spiderLeapSpeed;
+    public double spiderLeapChance;
+    public int spiderWebTrapDuration;
+    public double spiderSwarmCallRange;
+    public double spiderSwarmCallHeight;
+    // クリーパー毒ガス
+    public double creeperPoisonCloudRadius;
+    public int creeperPoisonCloudDuration;
+    public double creeperPoisonCloudRadiusOnUse;
+    // 建築AI
+    public double climbingSpeed;
+    public double stuckDistanceThreshold;
+    public int stuckTickLimit;
+    public double lookaheadDistance;
+    public double verticalBuildHeight;
+    public double verticalBuildCloseDistance;
+    public double bridgeMinDistance;
+    public int temporaryBlockDuration;
+    public int damageAnimationInterval;
+    // 拾得AI
+    public double equipmentDetectionRange;
+    public int lootingAiInterval;
+    // キャンプファイア回復
+    public double campfireHealAmount;
+    public double campfireScanRange;
+    public double campfireScanHeight;
+    public int campfireTaskInterval;
+    private org.bukkit.scheduler.BukkitTask campfireTask = null;
+
+    private void registerMobTask(Monster m, int taskId) {
+        mobTasks.computeIfAbsent(m.getUniqueId(), k -> new java.util.ArrayList<>()).add(taskId);
+    }
+
+    private void cancelMobTasks(Monster m) {
+        java.util.List<Integer> ids = mobTasks.remove(m.getUniqueId());
+        if (ids != null) {
+            ids.forEach(id -> Bukkit.getScheduler().cancelTask(id));
+        }
+    }
+
 
     public EnchantedMobSystem(RascraftPluginPacks plugin) {
         this.plugin = plugin;
         this.enchantedKey = new NamespacedKey(plugin, "is_enchanted");
+        this.reinforcedKey = new NamespacedKey(plugin, "has_reinforced");
+
+        // Config値を読み込む
+        loadConfiguration();
+
+        startCampfireHealingTask();
+    }
+
+    /**
+     * config.yml から設定値を読み込む
+     */
+    private void loadConfiguration() {
+        var config = plugin.getConfig();
+        var emConfig = config.getConfigurationSection("enchanted-mobs");
+
+        if (emConfig == null) {
+            plugin.getLogger().warning("enchanted-mobs section not found in config.yml! Using defaults.");
+            loadDefaults();
+            return;
+        }
+
+        // スポーン確率
+        enchantedSpawnChance = emConfig.getDouble("enchanted-spawn-chance", 0.15);
+
+        // ステータス
+        var statsSection = emConfig.getConfigurationSection("stats");
+        if (statsSection != null) {
+            hpMultiplier = statsSection.getDouble("hp-multiplier", 2.5);
+            movementSpeed = statsSection.getDouble("movement-speed", 0.275);
+        } else {
+            hpMultiplier = 2.5;
+            movementSpeed = 0.275;
+        }
+
+        // パーティクル
+        var particlesSection = emConfig.getConfigurationSection("particles");
+        if (particlesSection != null) {
+            auraUpdateInterval = particlesSection.getInt("aura-update-interval", 4);
+            spiralAngleIncrement = particlesSection.getDouble("spiral-angle-increment", 0.4);
+            spiralRadius = particlesSection.getDouble("spiral-radius", 0.6);
+        } else {
+            auraUpdateInterval = 4;
+            spiralAngleIncrement = 0.4;
+            spiralRadius = 0.6;
+        }
+
+        // ナビゲーション
+        var navSection = emConfig.getConfigurationSection("navigation");
+        if (navSection != null) {
+            detectionRange = navSection.getDouble("detection-range", 48.0);
+            baseSpeed = navSection.getDouble("base-speed", 1.2);
+            farDistanceThreshold = navSection.getDouble("far-distance-threshold", 20);
+            farDistanceSpeed = navSection.getDouble("far-distance-speed", 1.6);
+            closeDistanceThreshold = navSection.getDouble("close-distance-threshold", 6);
+            closeDistanceSpeed = navSection.getDouble("close-distance-speed", 1.3);
+            stuckTicksThreshold = navSection.getInt("stuck-ticks-threshold", 15);
+            stuckJumpPower = navSection.getDouble("stuck-jump-power", 0.4);
+            stuckJumpHorizontal = navSection.getDouble("stuck-jump-horizontal", 0.2);
+        } else {
+            detectionRange = 48.0;
+            baseSpeed = 1.2;
+            farDistanceThreshold = 20;
+            farDistanceSpeed = 1.6;
+            closeDistanceThreshold = 6;
+            closeDistanceSpeed = 1.3;
+            stuckTicksThreshold = 15;
+            stuckJumpPower = 0.4;
+            stuckJumpHorizontal = 0.2;
+        }
+
+        // スケルトン
+        var skelSection = emConfig.getConfigurationSection("skeleton");
+        if (skelSection != null) {
+            arrowSpeedMultiplier = skelSection.getDouble("arrow-speed-multiplier", 1.4);
+            homingArrowChance = skelSection.getDouble("homing-arrow-chance", 0.10);
+            homingArrowSpeed = skelSection.getDouble("homing-arrow-speed", 0.4);
+        } else {
+            arrowSpeedMultiplier = 1.4;
+            homingArrowChance = 0.10;
+            homingArrowSpeed = 0.4;
+        }
+
+        // ゾンビ
+        var zombieSection = emConfig.getConfigurationSection("zombie");
+        if (zombieSection != null) {
+            commanderAuraRange = zombieSection.getDouble("commander-aura-range", 16);
+            commanderAuraHeight = zombieSection.getDouble("commander-aura-height", 8);
+            swarmAuraInterval = zombieSection.getInt("swarm-aura-interval", 40);
+            swarmDetectionRange = zombieSection.getDouble("swarm-detection-range", 15);
+            reinforcementHpThreshold = zombieSection.getDouble("reinforcement-hp-threshold", 10.0);
+            reinforcementSpawnChance = zombieSection.getDouble("reinforcement-spawn-chance", 0.25);
+            reinforcementCountMin = zombieSection.getInt("reinforcement-count-min", 2);
+            reinforcementCountMax = zombieSection.getInt("reinforcement-count-max", 5);
+            enchantedReinforcementChance = zombieSection.getDouble("enchanted-reinforcement-chance", 0.05);
+            reinforcementSpawnDistance = zombieSection.getDouble("reinforcement-spawn-distance", 3);
+        } else {
+            commanderAuraRange = 16;
+            commanderAuraHeight = 8;
+            swarmAuraInterval = 40;
+            swarmDetectionRange = 15;
+            reinforcementHpThreshold = 10.0;
+            reinforcementSpawnChance = 0.25;
+            reinforcementCountMin = 2;
+            reinforcementCountMax = 5;
+            enchantedReinforcementChance = 0.05;
+            reinforcementSpawnDistance = 3;
+        }
+
+        // クリーパー
+        var creeperSection = emConfig.getConfigurationSection("creeper");
+        if (creeperSection != null) {
+            creeperBaseSpeed = creeperSection.getDouble("base-movement-speed", 0.25);
+            creeperBackstabSpeed = creeperSection.getDouble("backstab-speed", 0.45);
+            creeperSidestepForce = creeperSection.getDouble("sidestep-force", 0.5);
+            creeperVisibilityThreshold = creeperSection.getDouble("visibility-threshold", 0.98);
+            creeperVisionRange = creeperSection.getDouble("vision-range", 15);
+            creeperBackstabDistance = creeperSection.getDouble("backstab-distance", 3.0);
+            creeperSidestepDistance = creeperSection.getDouble("sidestep-distance", 15);
+            creeperBurstMinDistance = creeperSection.getDouble("burst-min-distance", 5);
+            creeperBurstMaxDistance = creeperSection.getDouble("burst-max-distance", 12);
+            creeperBurstSpeed = creeperSection.getDouble("burst-speed", 1.4);
+            creeperBurstVerticalPower = creeperSection.getDouble("burst-vertical-power", 0.4);
+            creeperBurstCooldown = creeperSection.getInt("burst-cooldown", 40);
+        } else {
+            creeperBaseSpeed = 0.25;
+            creeperBackstabSpeed = 0.45;
+            creeperSidestepForce = 0.5;
+            creeperVisibilityThreshold = 0.98;
+            creeperVisionRange = 15;
+            creeperBackstabDistance = 3.0;
+            creeperSidestepDistance = 15;
+            creeperBurstMinDistance = 5;
+            creeperBurstMaxDistance = 12;
+            creeperBurstSpeed = 1.4;
+            creeperBurstVerticalPower = 0.4;
+            creeperBurstCooldown = 40;
+        }
+
+        // クモ
+        var spiderSection = emConfig.getConfigurationSection("spider");
+        if (spiderSection != null) {
+            spiderWallClimbForce = spiderSection.getDouble("wall-climb-force", 0.15);
+            spiderWallClimbVertical = spiderSection.getDouble("wall-climb-vertical", 0.25);
+            spiderWallClimbHeightDiff = spiderSection.getDouble("wall-climb-height-diff", 1);
+            spiderLeapMinDistance = spiderSection.getDouble("leap-min-distance", 5);
+            spiderLeapMaxDistance = spiderSection.getDouble("leap-max-distance", 10);
+            spiderLeapSpeed = spiderSection.getDouble("leap-speed", 1.2);
+            spiderLeapChance = spiderSection.getDouble("leap-chance", 0.2);
+            spiderWebTrapDuration = spiderSection.getInt("web-trap-duration", 60);
+            spiderSwarmCallRange = spiderSection.getDouble("swarm-call-range", 20);
+            spiderSwarmCallHeight = spiderSection.getDouble("swarm-call-height", 10);
+        } else {
+            spiderWallClimbForce = 0.15;
+            spiderWallClimbVertical = 0.25;
+            spiderWallClimbHeightDiff = 1;
+            spiderLeapMinDistance = 5;
+            spiderLeapMaxDistance = 10;
+            spiderLeapSpeed = 1.2;
+            spiderLeapChance = 0.2;
+            spiderWebTrapDuration = 60;
+            spiderSwarmCallRange = 20;
+            spiderSwarmCallHeight = 10;
+        }
+
+        // クリーパー毒ガス
+        var poisonSection = emConfig.getConfigurationSection("creeper-poison");
+        if (poisonSection != null) {
+            creeperPoisonCloudRadius = poisonSection.getDouble("cloud-radius", 4.0);
+            creeperPoisonCloudDuration = poisonSection.getInt("cloud-duration", 200);
+            creeperPoisonCloudRadiusOnUse = poisonSection.getDouble("cloud-radius-on-use", -0.1);
+        } else {
+            creeperPoisonCloudRadius = 4.0;
+            creeperPoisonCloudDuration = 200;
+            creeperPoisonCloudRadiusOnUse = -0.1;
+        }
+
+        // 建築AI
+        var climbingSection = emConfig.getConfigurationSection("climbing");
+        if (climbingSection != null) {
+            climbingSpeed = climbingSection.getDouble("climbing-speed", 1.2);
+            stuckDistanceThreshold = climbingSection.getDouble("stuck-distance-threshold", 0.1);
+            stuckTickLimit = climbingSection.getInt("stuck-tick-limit", 5);
+            lookaheadDistance = climbingSection.getDouble("lookahead-distance", 1.6);
+            verticalBuildHeight = climbingSection.getDouble("vertical-build-height", 2.5);
+            verticalBuildCloseDistance = climbingSection.getDouble("vertical-build-close-distance", 1.5);
+            bridgeMinDistance = climbingSection.getDouble("bridge-min-distance", 1.5);
+            temporaryBlockDuration = climbingSection.getInt("temporary-block-duration", 100);
+            damageAnimationInterval = climbingSection.getInt("damage-animation-interval", 10);
+        } else {
+            climbingSpeed = 1.2;
+            stuckDistanceThreshold = 0.1;
+            stuckTickLimit = 5;
+            lookaheadDistance = 1.6;
+            verticalBuildHeight = 2.5;
+            verticalBuildCloseDistance = 1.5;
+            bridgeMinDistance = 1.5;
+            temporaryBlockDuration = 100;
+            damageAnimationInterval = 10;
+        }
+
+        // 拾得AI
+        var lootingSection = emConfig.getConfigurationSection("looting");
+        if (lootingSection != null) {
+            equipmentDetectionRange = lootingSection.getDouble("equipment-detection-range", 6);
+            lootingAiInterval = lootingSection.getInt("looting-ai-interval", 10);
+        } else {
+            equipmentDetectionRange = 6;
+            lootingAiInterval = 10;
+        }
+
+        // キャンプファイア回復
+        var campfireSection = emConfig.getConfigurationSection("campfire-healing");
+        if (campfireSection != null) {
+            campfireHealAmount = campfireSection.getDouble("heal-amount", 2.0);
+            campfireScanRange = campfireSection.getDouble("scan-range", 5);
+            campfireScanHeight = campfireSection.getDouble("scan-height", 3);
+            campfireTaskInterval = campfireSection.getInt("task-interval", 40);
+        } else {
+            campfireHealAmount = 2.0;
+            campfireScanRange = 5;
+            campfireScanHeight = 3;
+            campfireTaskInterval = 40;
+        }
+
+        plugin.getLogger().info("Enchanted Mobs configuration loaded successfully.");
+    }
+
+    /**
+     * プラグインのリロード時に呼び出す（外部からの再読み込み）
+     */
+    public void reloadConfiguration() {
+        loadConfiguration();
+
+        // キャンプファイアタスクは周期が変わる可能性があるため再起動する
+        if (campfireTask != null) {
+            campfireTask.cancel();
+            campfireTask = null;
+        }
+        startCampfireHealingTask();
+        // 既にスポーンしている Enchanted モブのタスクを再スケジュールして新設定を反映する
+        rescheduleAllEnchantedMobs();
+    }
+
+    /**
+     * デフォルト値をセット（互換性維持）
+     */
+    private void loadDefaults() {
+        enchantedSpawnChance = 0.15;
+        hpMultiplier = 2.5;
+        movementSpeed = 0.275;
+        auraUpdateInterval = 4;
+        spiralAngleIncrement = 0.4;
+        spiralRadius = 0.6;
+        detectionRange = 48.0;
+        baseSpeed = 1.2;
+        farDistanceThreshold = 20;
+        farDistanceSpeed = 1.6;
+        closeDistanceThreshold = 6;
+        closeDistanceSpeed = 1.3;
+        stuckTicksThreshold = 15;
+        stuckJumpPower = 0.4;
+        stuckJumpHorizontal = 0.2;
+        arrowSpeedMultiplier = 1.4;
+        homingArrowChance = 0.10;
+        homingArrowSpeed = 0.4;
+        commanderAuraRange = 16;
+        commanderAuraHeight = 8;
+        swarmAuraInterval = 40;
+        swarmDetectionRange = 15;
+        reinforcementHpThreshold = 10.0;
+        reinforcementSpawnChance = 0.25;
+        reinforcementCountMin = 2;
+        reinforcementCountMax = 5;
+        enchantedReinforcementChance = 0.05;
+        reinforcementSpawnDistance = 3;
+        creeperBaseSpeed = 0.25;
+        creeperBackstabSpeed = 0.45;
+        creeperSidestepForce = 0.5;
+        creeperVisibilityThreshold = 0.98;
+        creeperVisionRange = 15;
+        creeperBackstabDistance = 3.0;
+        creeperSidestepDistance = 15;
+        creeperBurstMinDistance = 5;
+        creeperBurstMaxDistance = 12;
+        creeperBurstSpeed = 1.4;
+        creeperBurstVerticalPower = 0.4;
+        creeperBurstCooldown = 40;
+        spiderWallClimbForce = 0.15;
+        spiderWallClimbVertical = 0.25;
+        spiderWallClimbHeightDiff = 1;
+        spiderLeapMinDistance = 5;
+        spiderLeapMaxDistance = 10;
+        spiderLeapSpeed = 1.2;
+        spiderLeapChance = 0.2;
+        spiderWebTrapDuration = 60;
+        spiderSwarmCallRange = 20;
+        spiderSwarmCallHeight = 10;
+        creeperPoisonCloudRadius = 4.0;
+        creeperPoisonCloudDuration = 200;
+        creeperPoisonCloudRadiusOnUse = -0.1;
+        climbingSpeed = 1.2;
+        stuckDistanceThreshold = 0.1;
+        stuckTickLimit = 5;
+        lookaheadDistance = 1.6;
+        verticalBuildHeight = 2.5;
+        verticalBuildCloseDistance = 1.5;
+        bridgeMinDistance = 1.5;
+        temporaryBlockDuration = 100;
+        damageAnimationInterval = 10;
+        equipmentDetectionRange = 6;
+        lootingAiInterval = 10;
+        campfireHealAmount = 2.0;
+        campfireScanRange = 5;
+        campfireScanHeight = 3;
+        campfireTaskInterval = 40;
     }
 
     // --- 1. スポーン時にEnchanted化 ---
     @EventHandler
-    public void onSpawn(EntitySpawnEvent event) {
+    public void onSpawn(CreatureSpawnEvent event) { // EntitySpawnEvent から CreatureSpawnEvent に変更
+        // 1. まず「Monsterであるか」を判定し、同時に変数 'monster' を定義する
         if (!(event.getEntity() instanceof Monster monster)) return;
+
+        // 2. PDCチェック (増援処理などで「判定済み」のマークがある場合はスキップ)
+        if (monster.getPersistentDataContainer().has(enchantedKey, PersistentDataType.BYTE)) return;
+
+        // 3. スポーン理由のチェック (プラグインによるCUSTOMスポーンは除外)
+        if (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.CUSTOM) return;
+
+        // --- ここから共通の処理 ---
         startLootingAI(monster);
 
-        // 15%の確率でEnchanted Mobに進化
-        if (random.nextDouble() < 0.15) {
+        // Enchanted Mobに進化する確率（config.yml から読み込み）
+        if (ThreadLocalRandom.current().nextDouble() < enchantedSpawnChance) {
             makeEnchanted(monster);
         }
     }
 
-    private final java.util.Map<org.bukkit.block.Block, Integer> activeBlocks = new java.util.HashMap<>();
 
-    private final java.util.Map<org.bukkit.block.Block, java.util.UUID> occupiedBlocks = new java.util.HashMap<>();
 
     // コードの可読性のために装備処理を分離
     private void applyEnchantedEquipment(Monster monster) {
         EntityEquipment equip = monster.getEquipment();
         if (equip == null) return;
 
-        // 鉄装備のセットアップ
+        // --- 1. 防具の生成 ---
         ItemStack helmet = new ItemStack(Material.IRON_HELMET);
         ItemStack chest = new ItemStack(Material.IRON_CHESTPLATE);
+
+        // --- 2. 鍛冶型（装飾）の適用 ---
+        // ゾンビならダイヤモンド、スケルトンならアメジストで装飾
+        if (monster instanceof Zombie) {
+            applyArmorTrim(helmet, TrimMaterial.DIAMOND);
+            applyArmorTrim(chest, TrimMaterial.DIAMOND);
+        } else if (monster instanceof Skeleton) {
+            applyArmorTrim(helmet, TrimMaterial.AMETHYST);
+            applyArmorTrim(chest, TrimMaterial.AMETHYST);
+        }
+
+        // 全ての装備に呪いを付与（ドロップ防止）
         helmet.addUnsafeEnchantment(Enchantment.VANISHING_CURSE, 1);
         chest.addUnsafeEnchantment(Enchantment.VANISHING_CURSE, 1);
+
+        // ランダムエンチャント
+        applyVanillaEnchants(helmet, "ARMOR");
+        applyVanillaEnchants(chest, "ARMOR");
+
         equip.setHelmet(helmet);
         equip.setChestplate(chest);
         equip.setHelmetDropChance(0f);
         equip.setChestplateDropChance(0f);
 
+        // --- 3. 武器の選定 (以前と同じ) ---
         ItemStack weapon = null;
+        String category = "";
+
         if (monster instanceof Zombie) {
-            double roll = random.nextDouble();
+            double roll = ThreadLocalRandom.current().nextDouble();
             if (roll < 0.4) {
-                if (roll < 0.1) weapon = new ItemStack(Material.DIAMOND_SWORD);
-                else if (roll < 0.2) weapon = new ItemStack(Material.IRON_AXE);
-                else if (roll < 0.3) weapon = new ItemStack(Material.CROSSBOW);
-                else weapon = new ItemStack(Material.IRON_SWORD);
+                if (roll < 0.05) { weapon = new ItemStack(Material.DIAMOND_SWORD); category = "SWORD"; }
+                else if (roll < 0.15) { weapon = new ItemStack(Material.IRON_AXE); category = "AXE"; }
+                else if (roll < 0.25) { weapon = new ItemStack(Material.CROSSBOW); category = "CROSSBOW"; }
+                else { weapon = new ItemStack(Material.IRON_SWORD); category = "SWORD"; }
             }
         } else if (monster instanceof Skeleton) {
             weapon = new ItemStack(Material.BOW);
+            category = "BOW";
         }
 
         if (weapon != null) {
-            applyRandomEnchant(weapon);
+            applyVanillaEnchants(weapon, category);
             equip.setItemInMainHand(weapon);
             equip.setItemInMainHandDropChance(0.05f);
         }
     }
 
-    private boolean isEnchanted(Entity entity) {
-        return entity.getPersistentDataContainer().has(enchantedKey, PersistentDataType.BYTE);
+    /**
+     * 防具に鍛冶型（装飾）を適用するヘルパーメソッド
+     */
+    private void applyArmorTrim(ItemStack item, org.bukkit.inventory.meta.trim.TrimMaterial material) {
+        if (!(item.getItemMeta() instanceof org.bukkit.inventory.meta.ArmorMeta armorMeta)) return;
+
+        // パターン：SENTRY（番人）- 職人が作り込んだような幾何学模様
+        org.bukkit.inventory.meta.trim.ArmorTrim trim = new org.bukkit.inventory.meta.trim.ArmorTrim(
+                material,
+                org.bukkit.inventory.meta.trim.TrimPattern.SHAPER
+        );
+
+        armorMeta.setTrim(trim);
+        item.setItemMeta(armorMeta);
     }
 
+    /**
+     * カテゴリーに応じたバニラ準拠のランダムエンチャントを適用する
+     */
+    private void applyVanillaEnchants(ItemStack item, String category) {
+        List<Enchantment> possible = new ArrayList<>();
+
+        // カテゴリー別・付与可能リスト
+        switch (category) {
+            case "ARMOR":
+                possible.addAll(Arrays.asList(Enchantment.PROTECTION, Enchantment.THORNS, Enchantment.UNBREAKING, Enchantment.THORNS, Enchantment.BLAST_PROTECTION, Enchantment.FIRE_PROTECTION, Enchantment.PROJECTILE_PROTECTION));
+                break;
+            case "SWORD":
+                possible.addAll(Arrays.asList(Enchantment.SHARPNESS, Enchantment.KNOCKBACK, Enchantment.FIRE_ASPECT));
+                break;
+            case "AXE":
+                possible.addAll(Arrays.asList(Enchantment.SHARPNESS, Enchantment.EFFICIENCY));
+                break;
+            case "BOW":
+                possible.addAll(Arrays.asList(Enchantment.POWER, Enchantment.PUNCH, Enchantment.FLAME, Enchantment.INFINITY));
+                break;
+            case "CROSSBOW":
+                possible.addAll(Arrays.asList(Enchantment.QUICK_CHARGE, Enchantment.MULTISHOT, Enchantment.PIERCING));
+                break;
+        }
+
+        if (possible.isEmpty()) return;
+
+        // シャッフルして付与する個数を決める (1〜3個)
+        Collections.shuffle(possible);
+        int amount = ThreadLocalRandom.current().nextInt(1, 4); // 1..3 包含
+
+        for (int i = 0; i < amount && i < possible.size(); i++) {
+            Enchantment ench = possible.get(i);
+
+            // バニラの最大レベルを取得 (例: Sharpnessなら5)
+            int maxLevel = ench.getMaxLevel();
+            // 1 〜 最大レベルの間でランダムに決定
+            int level = ThreadLocalRandom.current().nextInt(1, maxLevel + 1);
+
+            // 安全に付与（競合チェックを無視する場合は addUnsafeEnchantment）
+            item.addUnsafeEnchantment(ench, level);
+        }
+    }
+    private boolean isEnchanted(Entity entity) {
+        Byte b = entity.getPersistentDataContainer().get(enchantedKey, PersistentDataType.BYTE);
+        return b != null && b == (byte) 1;
+    }
+
+
     private void startVisualAura(Monster monster) {
-        new BukkitRunnable() {
+        org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
+            double angle = 0;
+
             @Override
             public void run() {
                 if (!monster.isValid() || monster.isDead()) {
                     cancel();
                     return;
                 }
-                monster.getWorld().spawnParticle(Particle.WITCH, monster.getLocation().add(0, 1, 0), 1, 0.2, 0.4, 0.2, 0.01);
+
+                Location baseLoc = monster.getLocation();
+                Location eyeLoc = baseLoc.clone().add(0, 1.2, 0);
+
+                // REDSTONE を DustOptions で表現 (カラー指定)
+                monster.getWorld().spawnParticle(Particle.DUST, eyeLoc, 1, new Particle.DustOptions(Color.FUCHSIA, 1.0f));
+
+                // 螺旋 (WITCH はデータ不要)
+                double x = Math.cos(angle) * spiralRadius;
+                double z = Math.sin(angle) * spiralRadius;
+                Location spiralLoc = baseLoc.clone().add(x, (angle % (Math.PI * 2)) / 3, z);
+                monster.getWorld().spawnParticle(Particle.WITCH, spiralLoc, 1, 0.0, 0.0, 0.0, 0.0);
+                angle += spiralAngleIncrement;
+
+                // --- 2. 【個別】種族別 ---
+                if (monster instanceof Zombie) {
+                    monster.getWorld().spawnParticle(Particle.FALLING_SPORE_BLOSSOM, eyeLoc, 2, 0.3, 0.5, 0.3, 0.0);
+                } else if (monster instanceof Skeleton) {
+                    monster.getWorld().spawnParticle(Particle.ASH, eyeLoc, 5, 0.2, 0.4, 0.2, 0.01);
+                } else if (monster instanceof Creeper) {
+                    if (ThreadLocalRandom.current().nextDouble() < 0.3) {
+                        monster.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, eyeLoc, 1, 0.2, 0.2, 0.2, 0.0);
+                    }
+                } else if (monster instanceof Spider) {
+                    monster.getWorld().spawnParticle(Particle.SQUID_INK, eyeLoc, 1, 0.3, 0.2, 0.3, 0.05);
+                } else {
+                    // REDSTONE を DustOptions で表現 (カラー指定)
+                    monster.getWorld().spawnParticle(Particle.DUST, eyeLoc, 1, new Particle.DustOptions(Color.FUCHSIA, 1.0f));
+                }
             }
-        }.runTaskTimer(plugin, 0, 5);
+        }.runTaskTimer(plugin, 0, auraUpdateInterval);
+        registerMobTask(monster, t.getTaskId());
     }
 
     public void makeEnchanted(Monster monster) {
@@ -106,13 +645,13 @@ public class EnchantedMobSystem implements Listener {
         // 基本ステータス（HP・名前）の適用
         var hp = monster.getAttribute(Attribute.MAX_HEALTH);
         if (hp != null) {
-            hp.setBaseValue(hp.getBaseValue() * 2.5);
+            hp.setBaseValue(hp.getBaseValue() * hpMultiplier);
             monster.setHealth(hp.getBaseValue());
         }
 
         var speed = monster.getAttribute(Attribute.MOVEMENT_SPEED);
         if (speed != null) {
-            speed.setBaseValue(0.32);
+            speed.setBaseValue(movementSpeed);
         }
 
         monster.setCustomName("§d§lEnchanted " + monster.getType().getName());
@@ -135,7 +674,7 @@ public class EnchantedMobSystem implements Listener {
         } else if (monster instanceof Creeper creeper) {
             startBurstAI(creeper);      // 【追加】バースト突進
         } else if (monster instanceof Spider spider) {
-            startLootingAI(spider);     // 拾得
+            
             // ※クモのWebTrap/飛びかかりはEvent/個体判定で処理
         }
 
@@ -144,7 +683,7 @@ public class EnchantedMobSystem implements Listener {
     }
 
     private void startCoreNavigationAI(Monster monster) {
-        new BukkitRunnable() {
+        org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
             private Location lastKnownLocation = null;
             private Location lastLoc = monster.getLocation();
             private int stuckTicks = 0;
@@ -162,13 +701,13 @@ public class EnchantedMobSystem implements Listener {
 
                 // 1. 【感知強化】ターゲットの徹底捜索と記憶
                 if (target == null || !target.isValid() || target.isDead()) {
-                    // 48マスの超広範囲スキャン
-                    target = findExtendedTarget(monster, 48.0);
+                    // 超広範囲スキャン
+                    target = findExtendedTarget(monster, detectionRange);
                     if (target != null) {
                         monster.setTarget(target);
                     } else if (lastKnownLocation != null) {
                         // ターゲットを見失っても、最後に見た場所へ向かう
-                        monster.getPathfinder().moveTo(lastKnownLocation, 1.2);
+                        monster.getPathfinder().moveTo(lastKnownLocation, baseSpeed);
                         if (mLoc.distance(lastKnownLocation) < 2) lastKnownLocation = null;
                         return;
                     }
@@ -188,19 +727,19 @@ public class EnchantedMobSystem implements Listener {
                 }
                 lastLoc = mLoc.clone();
 
-                if (stuckTicks > 15 && monster.isOnGround()) {
-                    // 15tick(0.75秒)以上足止めされたら、進行方向に小ジャンプして強引にパスを復旧
-                    Vector jumpDir = target.getLocation().toVector().subtract(mLoc.toVector()).normalize().multiply(0.2).setY(0.4);
+                if (stuckTicks > stuckTicksThreshold && monster.isOnGround()) {
+                    // スタック時の自己復帰ジャンプ
+                    Vector jumpDir = target.getLocation().toVector().subtract(mLoc.toVector()).normalize().multiply(stuckJumpHorizontal).setY(stuckJumpPower);
                     monster.setVelocity(jumpDir);
                     stuckTicks = 0;
                 }
 
                 // 3. 【速度の動的制御】距離に応じた「追い込み」
-                double speed = 1.2;
-                if (distance > 20) {
-                    speed = 1.6; // 遠距離：一気に距離を詰める（ダッシュ）
-                } else if (distance < 6) {
-                    speed = 1.3; // 近距離：逃がさない速度
+                double speed = baseSpeed;
+                if (distance > farDistanceThreshold) {
+                    speed = farDistanceSpeed; // 遠距離：一気に距離を詰める（ダッシュ）
+                } else if (distance < closeDistanceThreshold) {
+                    speed = closeDistanceSpeed; // 近距離：逃がさない速度
                 }
 
                 // 壁越しでもターゲットを認識し続ける（パスの再計算頻度を上げる）
@@ -222,6 +761,46 @@ public class EnchantedMobSystem implements Listener {
                 }
             }
         }.runTaskTimer(plugin, 0, 5); // 0.25秒ごとに更新（反応速度を倍に強化）
+        registerMobTask(monster, t.getTaskId());
+    }
+
+    /**
+     * 既にスポーンしている Enchanted Mob に対して、タスクをキャンセルして
+     * 新しい設定で再スケジュールします。
+     */
+    public void rescheduleAllEnchantedMobs() {
+        for (org.bukkit.World world : Bukkit.getWorlds()) {
+            for (org.bukkit.entity.Entity e : world.getEntities()) {
+                if (!(e instanceof Monster m)) continue;
+                if (!isEnchanted(m)) continue;
+
+                // 既存タスクをキャンセル
+                cancelMobTasks(m);
+
+                // ステータス反映（移動速度などは即時適用）
+                var speedAttr = m.getAttribute(Attribute.MOVEMENT_SPEED);
+                if (speedAttr != null) {
+                    speedAttr.setBaseValue(movementSpeed);
+                }
+
+                // 各種AIを再スケジュール
+                startCoreNavigationAI(m);
+                startVisualAura(m);
+
+                if (m instanceof Zombie zombie) {
+                    startClimbingAI(zombie);
+                    startCommanderAura(zombie);
+                    startLootingAI(zombie);
+                } else if (m instanceof Skeleton skeleton) {
+                    startClimbingAI(skeleton);
+                    startLootingAI(skeleton);
+                } else if (m instanceof Creeper creeper) {
+                    startBurstAI(creeper);
+                } else if (m instanceof Spider) {
+                    // Spider-specific behaviors are event-driven; nothing to schedule here
+                }
+            }
+        }
     }
 
     // --- 2. スケルトンのAI強化 (偏差撃ち & バックステップ) ---
@@ -234,12 +813,12 @@ public class EnchantedMobSystem implements Listener {
         Location sLoc = skeleton.getEyeLocation();
         Location pLoc = player.getEyeLocation();
 
-        // バニラの初速を取得し、1.4倍（程よい速さ）に強化
+        // バニラの初速を取得し、強化倍率を適用
         double baseSpeed = event.getProjectile().getVelocity().length();
-        double straightSpeed = baseSpeed * 1.4;
+        double straightSpeed = baseSpeed * arrowSpeedMultiplier;
 
-        // --- 2. 弾種の分岐 (約10%でホーミング弾) ---
-        if (ThreadLocalRandom.current().nextDouble() < 0.10) {
+        // --- 2. 弾種の分岐 (ホーミング矢) ---
+        if (ThreadLocalRandom.current().nextDouble() < homingArrowChance) {
             launchHomingArrow(skeleton, player);
             event.setCancelled(true); // 通常の矢の発射をキャンセル
             return;
@@ -295,8 +874,8 @@ public class EnchantedMobSystem implements Listener {
                 // ターゲットへの方向を毎チック再計算（ホーミング）
                 Vector toTarget = target.getEyeLocation().toVector().subtract(homingArrow.getLocation().toVector()).normalize();
 
-                // 低速 (0.4) でじわじわ追いかける
-                homingArrow.setVelocity(toTarget.multiply(0.4));
+                // 低速でじわじわ追いかける
+                homingArrow.setVelocity(toTarget.multiply(homingArrowSpeed));
 
                 // 軌跡のパーティクル
                 homingArrow.getWorld().spawnParticle(Particle.END_ROD, homingArrow.getLocation(), 1, 0, 0, 0, 0);
@@ -312,8 +891,7 @@ public class EnchantedMobSystem implements Listener {
     public void onSkeletonAI(EntityTargetLivingEntityEvent event) {
         if (!(event.getEntity() instanceof Skeleton skeleton) || !isEnchanted(skeleton)) return;
         if (!(event.getTarget() instanceof Player player)) return;
-
-        new BukkitRunnable() {
+        org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
             @Override
             public void run() {
                 if (!skeleton.isValid() || skeleton.isDead()) {
@@ -334,20 +912,24 @@ public class EnchantedMobSystem implements Listener {
                 // --- 接近モード (5マス以内) ---
                 if (dist <= 5.0) {
                     // 武器を斧に持ち替え
-                    if (equip.getItemInMainHand().getType() != Material.STONE_AXE) {
+                    ItemStack main = equip.getItemInMainHand();
+                    Material mainType = (main == null) ? Material.AIR : main.getType();
+                    if (mainType != Material.STONE_AXE) {
                         equip.setItemInMainHand(new ItemStack(Material.STONE_AXE));
                         skeleton.getWorld().playSound(skeleton.getLocation(), Sound.ITEM_ARMOR_EQUIP_CHAIN, 1f, 1.2f);
                     }
 
-                    // 【変更点】物理 Velocity ではなくスピードポーションを付与 (Speed II)
-                    // 持続時間を短く(15tick)設定し、このタスク(10tick周期)で上書きし続けることで、
+                    // 【変更点】物理 Velocity ではなくスピードポーション を付与 (Speed II)
+                    // 持続時間を短く設定し、このタスク(10tick周期)で上書きし続けることで、
                     // 「接近中だけ速い」状態を自然に作ります。
                     skeleton.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 15, 1, false, false, false));
 
                 }
                 // --- 狙撃モード (5マスより遠い) ---
                 else {
-                    if (equip.getItemInMainHand().getType() != Material.BOW) {
+                    ItemStack main = equip.getItemInMainHand();
+                    Material mainType = (main == null) ? Material.AIR : main.getType();
+                    if (mainType != Material.BOW) {
                         equip.setItemInMainHand(new ItemStack(Material.BOW));
                         // 弓に戻したときはスピードを解除（バニラの挙動に合わせる）
                         skeleton.removePotionEffect(PotionEffectType.SPEED);
@@ -355,6 +937,7 @@ public class EnchantedMobSystem implements Listener {
                 }
             }
         }.runTaskTimer(plugin, 0, 10);
+        registerMobTask(skeleton, t.getTaskId());
     }
 
     // 拡張索敵メソッド
@@ -427,10 +1010,20 @@ public class EnchantedMobSystem implements Listener {
 
     // デス時にUUIDをセットから削除してメモリ漏洩を防ぐ
     @EventHandler
-    public void onEnchantedDeath(org.bukkit.event.entity.EntityDeathEvent event) {
-        reinforcedEntities.remove(event.getEntity().getUniqueId());
+    public void onMonsterDeath(org.bukkit.event.entity.EntityDeathEvent event) {
+        if (event.getEntity() instanceof Monster m) {
+            cancelMobTasks(m);
+        }
     }
 
+    @EventHandler
+    public void onChunkUnload(org.bukkit.event.world.ChunkUnloadEvent event) {
+        for (org.bukkit.entity.Entity e : event.getChunk().getEntities()) {
+            if (e instanceof Monster m) {
+                cancelMobTasks(m);
+            }
+        }
+    }
     // --- 6. クリーパーのAI: サイドステップ & 不意打ち加速 ---
     @EventHandler
     public void onCreeperUpdate(EntityTargetLivingEntityEvent event) {
@@ -458,8 +1051,8 @@ public class EnchantedMobSystem implements Listener {
                 AttributeInstance speedInstance = creeper.getAttribute(Attribute.MOVEMENT_SPEED);
 
                 // A. サイドステップ (プレイヤーに見られている時)
-                if (dot > 0.98 && distance < 15) { // 視線がほぼクリーパーを捉えている
-                    Vector sideStep = new Vector(-playerDirection.getZ(), 0, playerDirection.getX()).normalize().multiply(0.5);
+                if (dot > creeperVisibilityThreshold && distance < creeperSidestepDistance) { // 視線がほぼクリーパーを捉えている
+                    Vector sideStep = new Vector(-playerDirection.getZ(), 0, playerDirection.getX()).normalize().multiply(creeperSidestepForce);
                     if (random.nextBoolean()) sideStep.multiply(-1); // 左右ランダム
                     creeper.setVelocity(creeper.getVelocity().add(sideStep));
                     creeper.getWorld().spawnParticle(Particle.CLOUD, cLoc, 1, 0.1, 0.1, 0.1, 0.05);
@@ -467,13 +1060,13 @@ public class EnchantedMobSystem implements Listener {
 
                 // B. 不意打ち加速 (プレイヤーが背を向けている時)
                 if (dot < 0 && speed != null) {
-                    speed.setBaseValue(0.45); // 通常の倍近い速度
+                    speed.setBaseValue(creeperBackstabSpeed); // 背後フェイズの速度
                 } else if (speed != null) {
-                    speed.setBaseValue(0.25);
+                    speed.setBaseValue(creeperBaseSpeed);
                 }
 
                 // C. 跳躍爆破 (起爆寸前)
-                if (creeper.isIgnited() || (distance < 3.0 && random.nextDouble() < 0.1)) {
+                if (creeper.isIgnited() || (distance < creeperBackstabDistance && random.nextDouble() < 0.1)) {
                     if (creeper.isOnGround()) {
                         creeper.setVelocity(new Vector(0, 0.4, 0));
                     }
@@ -487,7 +1080,7 @@ public class EnchantedMobSystem implements Listener {
         leadZombie.setTarget(target);
 
         // 2. 周囲のゾンビを呼ぶ
-        for (Entity nearby : leadZombie.getNearbyEntities(15, 7, 15)) {
+        for (Entity nearby : leadZombie.getNearbyEntities(swarmDetectionRange, commanderAuraHeight / 2, swarmDetectionRange)) {
             if (nearby instanceof Zombie fellow) {
                 // 指揮官と同じターゲットを強制設定
                 fellow.setTarget(target);
@@ -508,7 +1101,7 @@ public class EnchantedMobSystem implements Listener {
         }
 
         // 演出：指揮官が咆哮するような音
-        leadZombie.getWorld().playSound(leadZombie.getLocation(), Sound.ENTITY_ZOMBIE_AMBIENT, 1.5f, 0.5f);
+        
     }
 
     // --- 7. クモのAI: 粘着糸 & 飛びかかり ---
@@ -522,7 +1115,7 @@ public class EnchantedMobSystem implements Listener {
         if (feet.getBlock().getType() == Material.AIR) {
             feet.getBlock().setType(Material.COBWEB);
 
-            // 3秒後にクモの巣を消去するタスク
+            // 設定値に基づいて削除するタスク
             new BukkitRunnable() {
                 @Override
                 public void run() {
@@ -530,7 +1123,7 @@ public class EnchantedMobSystem implements Listener {
                         feet.getBlock().setType(Material.AIR);
                     }
                 }
-            }.runTaskLater(plugin, 60);
+            }.runTaskLater(plugin, spiderWebTrapDuration);
 
             // 2. 周囲のクモを呼び寄せる (集団狩猟ロジック)
             callNearbySpidersTo(player, spider);
@@ -556,9 +1149,9 @@ public class EnchantedMobSystem implements Listener {
                 }
                 double dist = spider.getLocation().distance(player.getLocation());
 
-                // 飛びかかり奇襲 (間合いが5~10ブロックの時)
-                if (dist > 5 && dist < 10 && spider.isOnGround() && random.nextDouble() < 0.2) {
-                    Vector leap = player.getLocation().toVector().subtract(spider.getLocation().toVector()).normalize().multiply(1.2);
+                // 飛びかかり奇襲 (間合いが設定値の時)
+                if (dist > spiderLeapMinDistance && dist < spiderLeapMaxDistance && spider.isOnGround() && random.nextDouble() < spiderLeapChance) {
+                    Vector leap = player.getLocation().toVector().subtract(spider.getLocation().toVector()).normalize().multiply(spiderLeapSpeed);
                     leap.setY(0.5);
                     spider.setVelocity(leap);
                     spider.getWorld().playSound(spider.getLocation(), Sound.ENTITY_SPIDER_AMBIENT, 1f, 0.5f);
@@ -567,28 +1160,14 @@ public class EnchantedMobSystem implements Listener {
         }.runTaskTimer(plugin, 0, 20);
     }
 
-    private void applyRandomEnchant(ItemStack item) {
-        Enchantment[] enchants;
-        if (item.getType() == Material.CROSSBOW) {
-            enchants = new Enchantment[]{Enchantment.QUICK_CHARGE, Enchantment.MULTISHOT, Enchantment.PIERCING};
-        } else if (item.getType() == Material.IRON_AXE) {
-            enchants = new Enchantment[]{Enchantment.SHARPNESS, Enchantment.KNOCKBACK};
-        } else {
-            enchants = new Enchantment[]{Enchantment.SHARPNESS, Enchantment.FIRE_ASPECT, Enchantment.KNOCKBACK};
-        }
 
-        // ランダムに1つ選んでレベル1〜2を付y
-        Enchantment selected = enchants[random.nextInt(enchants.length)];
-        item.addUnsafeEnchantment(selected, random.nextInt(2) + 1);
-        item.addUnsafeEnchantment(Enchantment.VANISHING_CURSE, 1); // 見た目を光らせる
-    }
 
     /**
      * 周囲のクモを呼び寄せ、特定のプレイヤーを攻撃させる
      */
     private void callNearbySpidersTo(Player target, Spider attacker) {
-        // 周囲20ブロック以内のエンティティを検索
-        List<Entity> nearby = attacker.getNearbyEntities(20, 10, 20);
+        // 周囲のエンティティを検索
+        List<Entity> nearby = attacker.getNearbyEntities(spiderSwarmCallRange, spiderSwarmCallHeight, spiderSwarmCallRange);
 
         for (Entity entity : nearby) {
             // 自分以外のクモ（洞窟クモ含む）を対象にする
@@ -610,9 +1189,9 @@ public class EnchantedMobSystem implements Listener {
         }
     }
 
-    // --- 8. 指揮官のオーラ (ゾンビの周囲16ブロック強化) ---
+    // --- 8. 指揮官のオーラ (ゾンビの周囲強化) ---
     private void startCommanderAura(Zombie commander) {
-        new BukkitRunnable() {
+        org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
             @Override
             public void run() {
                 // 指揮官が無効になったらタスク終了
@@ -621,8 +1200,8 @@ public class EnchantedMobSystem implements Listener {
                     return;
                 }
 
-                // 周囲16ブロックのエンティティを取得
-                List<Entity> nearby = commander.getNearbyEntities(16, 8, 16);
+                // 周囲のエンティティを取得
+                List<Entity> nearby = commander.getNearbyEntities(commanderAuraRange, commanderAuraHeight, commanderAuraRange);
                 for (Entity entity : nearby) {
                     // 対象の条件：
                     // 1. モンスターであること
@@ -647,7 +1226,8 @@ public class EnchantedMobSystem implements Listener {
                     }
                 }
             }
-        }.runTaskTimer(plugin, 0, 40); // 2秒周期
+        }.runTaskTimer(plugin, 0, swarmAuraInterval); // config値で周期を制御
+        registerMobTask(commander, t.getTaskId());
     }
     // --- 9. クリーパーの毒ガス爆発 ---
     @EventHandler
@@ -658,67 +1238,96 @@ public class EnchantedMobSystem implements Listener {
 
         // 爆発後に残留ポーションの雲 (AreaEffectCloud) を生成
         AreaEffectCloud cloud = (AreaEffectCloud) loc.getWorld().spawnEntity(loc, EntityType.AREA_EFFECT_CLOUD);
-        cloud.setRadius(4.0f);
-        cloud.setDuration(200); // 10秒間
-        cloud.setRadiusOnUse(-0.1f); // 誰かが触れるたびに少し小さくなる
+        cloud.setRadius((float) creeperPoisonCloudRadius);
+        cloud.setDuration(creeperPoisonCloudDuration); // config値で持続時間を制御
+        cloud.setRadiusOnUse((float) creeperPoisonCloudRadiusOnUse); // 誰かが触れるたびに少し小さくなる
         cloud.setWaitTime(0);
 
         // デバフ効果（鈍鈍 + 弱体化）
-        cloud.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SLOWNESS, 200, 1), true);
-        cloud.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, 200, 1), true);
+        cloud.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SLOWNESS, creeperPoisonCloudDuration, 1), true);
+        cloud.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, creeperPoisonCloudDuration, 1), true);
 
         cloud.setColor(org.bukkit.Color.PURPLE); // 禍々しい紫色
         creeper.getWorld().playSound(loc, Sound.ENTITY_DRAGON_FIREBALL_EXPLODE, 1f, 0.5f);
     }
 
+
     @EventHandler
     public void onZombieLowHP(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Zombie zombie) || !isEnchanted(zombie)) return;
 
-        // 既に増援を呼んだ個体は除外（一回限りの制限）
-        if (reinforcedEntities.contains(zombie.getUniqueId())) return;
+        // 【修正】PDCを使って増援済みかをチェック（メモリリーク防止）
+        if (zombie.getPersistentDataContainer().has(reinforcedKey, PersistentDataType.BYTE)) return;
 
-        // 現在の体力からダメージを引いた値が 10.0 以下かチェック
-        if (zombie.getHealth() - event.getFinalDamage() <= 10.0) {
+        // 体力判定 (config値以下)
+        if (zombie.getHealth() - event.getFinalDamage() <= reinforcementHpThreshold) {
+            // 確率で「救援要請」
+            if (ThreadLocalRandom.current().nextDouble() < reinforcementSpawnChance) {
 
-            // 攻撃を受けるたびに 25% の確率で発動
-            if (random.nextDouble() < 0.25) {
+                // 【修正】増援済みフラグをPDCに書き込み
+                zombie.getPersistentDataContainer().set(reinforcedKey, PersistentDataType.BYTE, (byte) 1);
 
-                // 発動フラグを立てる（一回限り）
-                reinforcedEntities.add(zombie.getUniqueId());
+                // --- 発動時の演出 ---
+                Location loc = zombie.getLocation();
+                zombie.getWorld().playSound(loc, Sound.ENTITY_ZOMBIE_VILLAGER_CONVERTED, 1.0f, 0.5f);
+                zombie.getWorld().spawnParticle(Particle.ANGRY_VILLAGER, loc.add(0, 1, 0), 15, 0.5, 0.5, 0.5, 0); // 修正: パーティクル名を最新APIに適合
 
-                // 演出
-                zombie.getWorld().spawnParticle(Particle.ANGRY_VILLAGER, zombie.getLocation().add(0, 1, 0), 10, 0.5, 0.5, 0.5, 0.1);
-                zombie.getWorld().playSound(zombie.getLocation(), Sound.ENTITY_ZOMBIE_INFECT, 1.0f, 0.5f);
-
-                // 3体の増援を召喚
-                for (int i = 0; i < 3; i++) {
-                    double offsetX = (random.nextDouble() - 0.5) * 3;
-                    double offsetZ = (random.nextDouble() - 0.5) * 3;
-
-                    zombie.getWorld().spawn(zombie.getLocation().add(offsetX, 0, offsetZ), Zombie.class, fellow -> {
-                        fellow.setCustomName("§7Reinforcement");
-
-                        // ターゲットを親ゾンビと同期
-                        if (zombie.getTarget() != null) {
-                            fellow.setTarget(zombie.getTarget());
-                        }
-
-                        // 増援用の装備
-                        EntityEquipment fellowEquip = fellow.getEquipment();
-                        if (fellowEquip != null) {
-                            fellowEquip.setHelmet(new ItemStack(Material.LEATHER_HELMET));
-                            fellowEquip.setChestplate(new ItemStack(Material.LEATHER_CHESTPLATE));
-                            fellowEquip.setHelmetDropChance(0.0f);
-                            fellowEquip.setChestplateDropChance(0.0f);
-                        }
-
-                        // 増援にも「呼び声（加速ポーション）」などのAIが適用されるように
-                        // 必要に応じてここで basic stats などを設定しても良いでしょう
-                    });
+                // 増援を召喚
+                int count = ThreadLocalRandom.current().nextInt(reinforcementCountMin, reinforcementCountMax + 1);
+                for (int i = 0; i < count; i++) {
+                    spawnReinforcement(zombie);
                 }
             }
         }
+    }
+
+    /**
+     * 増援ゾンビのスポーン処理
+     */
+    private void spawnReinforcement(Zombie leader) {
+        double x = (ThreadLocalRandom.current().nextDouble() - 0.5) * (reinforcementSpawnDistance * 2);
+        double z = (ThreadLocalRandom.current().nextDouble() - 0.5) * (reinforcementSpawnDistance * 2);
+        Location spawnLoc = leader.getLocation().add(x, 0, z);
+
+        if (spawnLoc.getBlock().getType().isSolid()) {
+            spawnLoc.add(0, 1, 0);
+        }
+
+        leader.getWorld().spawn(spawnLoc, Zombie.class, fellow -> {
+            // --- 【解決策】まず「判定済み」として 0 (False) を書き込む ---
+            // これにより onSpawn メソッド内の二重判定を完全にブロックします
+            fellow.getPersistentDataContainer().set(enchantedKey, PersistentDataType.BYTE, (byte) 0);
+
+            // 増援の連鎖（増援がさらに増援を呼ぶ）を防ぐためのフラグ
+            fellow.getPersistentDataContainer().set(reinforcedKey, PersistentDataType.BYTE, (byte) 1);
+
+            // 増援としての判定確率
+            if (ThreadLocalRandom.current().nextDouble() < enchantedReinforcementChance) {
+                // ここで呼び出す makeEnchanted が PDC を 1 に更新します
+                makeEnchanted(fellow);
+
+                fellow.getWorld().strikeLightningEffect(fellow.getLocation());
+                fellow.setCustomName("§d§lEnchanted Reinforcement");
+            } else {
+                // 確率に漏れた個体：通常の増援設定
+                fellow.setCustomName("§7Zombie Grunt");
+                EntityEquipment equip = fellow.getEquipment();
+                if (equip != null) {
+                    // 装備は鉄ではなくレザーなどで差別化
+                    equip.setHelmet(new ItemStack(Material.LEATHER_HELMET));
+                    equip.setChestplate(new ItemStack(Material.LEATHER_CHESTPLATE));
+                    equip.setHelmetDropChance(0f);
+                    equip.setChestplateDropChance(0f);
+                }
+            }
+
+            if (leader.getTarget() != null) {
+                fellow.setTarget(leader.getTarget());
+            }
+
+            // 1.21対応：演出エフェクト（INSTANT_EFFECTは色指定必須）
+            fellow.getWorld().spawnParticle(Particle.CLOUD, fellow.getLocation(), 5, 0.2, 0.2, 0.2, 0.05);
+        });
     }
 
     private boolean isUndead(Entity entity) {
@@ -733,7 +1342,7 @@ public class EnchantedMobSystem implements Listener {
     }
 
     private void startClimbingAI(Monster monster) {
-        new BukkitRunnable() {
+        org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
             private Location lastLoc = monster.getLocation();
             private int stuckTicks = 0;
 
@@ -755,7 +1364,7 @@ public class EnchantedMobSystem implements Listener {
                 double diffY = tLoc.getY() - mLoc.getY();
 
                 // 1. スタック検知
-                if (mLoc.distance(lastLoc) < 0.1) {
+                if (mLoc.distance(lastLoc) < stuckDistanceThreshold) {
                     stuckTicks++;
                 } else {
                     stuckTicks = 0;
@@ -763,7 +1372,7 @@ public class EnchantedMobSystem implements Listener {
                 lastLoc = mLoc.clone();
 
                 // 2. 基本移動指示
-                monster.getPathfinder().moveTo(target, 1.2);
+                monster.getPathfinder().moveTo(target, climbingSpeed);
 
                 // 3. 高度同期（完了判定）
                 if (diffY < 0.5) {
@@ -789,7 +1398,7 @@ public class EnchantedMobSystem implements Listener {
 
                 // --- 5. 衝突回避（場所の予約） ---
                 org.bukkit.block.Block currentBlock = mLoc.getBlock();
-                java.util.UUID occupier = occupiedBlocks.get(currentBlock);
+                java.util.UUID occupier = occupiedBlocks.get(currentBlock.getLocation());
                 if (occupier != null && !occupier.equals(monster.getUniqueId())) {
                     Entity other = Bukkit.getEntity(occupier);
                     if (other != null && other.isValid() && other.getLocation().distance(mLoc) < 1.0) {
@@ -797,36 +1406,36 @@ public class EnchantedMobSystem implements Listener {
                         monster.setVelocity(monster.getVelocity().add(escape));
                         return;
                     } else {
-                        occupiedBlocks.remove(currentBlock);
+                        occupiedBlocks.remove(currentBlock.getLocation());
                     }
                 }
 
                 // --- 6. 建築ロジック ---
 
                 // A: 【柵・段差対策】進行方向2マス先まで検知
-                // 1.5ブロック以上の段差（柵など）がある場合、手前に足場を作る
+                // 段差がある場合、手前に足場を作る
                 Location probe1 = mLoc.clone().add(dir.clone().multiply(0.8));
-                Location probe2 = mLoc.clone().add(dir.clone().multiply(1.6));
+                Location probe2 = mLoc.clone().add(dir.clone().multiply(lookaheadDistance));
 
-                if (diffY > 1.2 && (probe1.getBlock().getType().isSolid() || probe2.getBlock().getType().isSolid())) {
+                if (diffY > verticalBuildCloseDistance && (probe1.getBlock().getType().isSolid() || probe2.getBlock().getType().isSolid())) {
                     org.bukkit.block.Block stepBase = mLoc.getBlock();
                     if (stepBase.getType() == Material.AIR) {
-                        refreshTemporaryBlock(stepBase);
+                        refreshTemporaryBlock(stepBase.getLocation());
                         monster.setVelocity(new Vector(0, 0.42, 0));
                         return;
                     }
                 }
 
-                // B: 【垂直縦積み】壁が2.5マス以上、または密着・スタック時
-                if ((diffY >= 2.5 && distH <= 2.0) || (distH <= 1.5 || stuckTicks > 5)) {
+                // B: 【垂直縦積み】壁が高い、または密着・スタック時
+                if ((diffY >= verticalBuildHeight && distH <= 2.0) || (distH <= verticalBuildCloseDistance || stuckTicks > stuckTickLimit)) {
                     org.bukkit.block.Block feet = mLoc.getBlock();
                     // 足元が空気かつ、下が土台ブロックであること
                     if (feet.getType() == Material.AIR && mLoc.getBlock().getRelative(0, -1, 0).getType().isSolid()) {
-                        occupiedBlocks.put(feet, monster.getUniqueId());
+                        occupiedBlocks.put(feet.getLocation(), monster.getUniqueId());
                         Location center = feet.getLocation().add(0.5, 0.1, 0.5);
                         center.setDirection(mLoc.getDirection());
                         monster.teleport(center);
-                        refreshTemporaryBlock(feet);
+                        refreshTemporaryBlock(feet.getLocation());
                         monster.setVelocity(new Vector(0, 0.42, 0));
                         stuckTicks = 0;
                         return;
@@ -834,7 +1443,7 @@ public class EnchantedMobSystem implements Listener {
                 }
 
                 // C: 【橋渡し】2マス以上の崖がある場合
-                if (distH > 1.5) {
+                if (distH > bridgeMinDistance) {
                     occupiedBlocks.values().removeIf(uuid -> uuid.equals(monster.getUniqueId()));
                     org.bukkit.block.Block bridgeBlock = probe1.getBlock().getRelative(0, -1, 0);
                     org.bukkit.block.Block deepBlock = probe1.getBlock().getRelative(0, -2, 0);
@@ -842,39 +1451,86 @@ public class EnchantedMobSystem implements Listener {
                     if (bridgeBlock.getType() == Material.AIR && deepBlock.getType() == Material.AIR) {
                         if (!probe1.getBlock().getRelative(0, 1, 0).getType().isSolid() &&
                                 !probe1.getBlock().getRelative(0, 2, 0).getType().isSolid()) {
-                            refreshTemporaryBlock(bridgeBlock);
+                            refreshTemporaryBlock(bridgeBlock.getLocation());
                             monster.setVelocity(monster.getVelocity().add(dir.multiply(0.1)));
                         }
                     }
                 }
             }
         }.runTaskTimer(plugin, 0, 5);
+        registerMobTask(monster, t.getTaskId());
     }
 
-    // ブロックを設置、または既存の消去タスクを上書きして延長するメソッド
-    private void refreshTemporaryBlock(org.bukkit.block.Block block) {
-        // すでにタスクがある場合はキャンセルしてタイマーをリセット
-        if (activeBlocks.containsKey(block)) {
-            Bukkit.getScheduler().cancelTask(activeBlocks.get(block));
+    private void refreshTemporaryBlock(Location blockLoc) {
+        org.bukkit.block.Block block = blockLoc.getBlock();
+        // 既存タスクのクリーンアップ
+        if (activeBlocks.containsKey(blockLoc)) {
+            Bukkit.getScheduler().cancelTask(activeBlocks.get(blockLoc));
+            activeBlocks.remove(blockLoc);
+            // ひびを完全に消去
+            block.getWorld().getPlayers().forEach(p -> p.sendBlockDamage(block.getLocation(), 0.0f));
         } else {
-            // 新規設置の場合
-            block.setType(Material.MOSSY_COBBLESTONE);
-            block.getWorld().playSound(block.getLocation(), Sound.BLOCK_STONE_PLACE, 0.5f, 0.8f);
+            if (block.getType() == Material.AIR) {
+                block.setType(Material.MOSSY_COBBLESTONE);
+                block.getWorld().playSound(block.getLocation(), Sound.BLOCK_STONE_PLACE, 0.5f, 0.8f);
+            }
         }
 
-        // 新しい消去タスクをスケジュール（5秒後）
+        // ひび割れアニメーションタスク 
         int taskId = new BukkitRunnable() {
+            int damageStage = 0; // 0から9までの段階
+
             @Override
             public void run() {
-                if (block.getType() == Material.MOSSY_COBBLESTONE) {
-                    block.setType(Material.AIR);
-                    block.getWorld().spawnParticle(Particle.BLOCK, block.getLocation().add(0.5, 0.5, 0.5), 10, 0.2, 0.2, 0.2, Material.MOSSY_COBBLESTONE.createBlockData());
+                if (block.getType() != Material.MOSSY_COBBLESTONE) {
+                    clearDamage(block);
+                    activeBlocks.remove(blockLoc);
+                    cancel();
+                    return;
                 }
-                activeBlocks.remove(block);
-            }
-        }.runTaskLater(plugin, 100).getTaskId();
 
-        activeBlocks.put(block, taskId);
+                // --- ひびを段階的に送る (0.0f ~ 0.9f) ---
+                float progress = damageStage / 10.0f;
+                block.getWorld().getPlayers().forEach(p -> p.sendBlockDamage(block.getLocation(), progress));
+
+                damageStage++;
+
+                // 完全に消去される時点で削除
+                if (damageStage > 10) {
+                    block.setType(Material.AIR);
+                    block.getWorld().spawnParticle(Particle.BLOCK, block.getLocation().add(0.5, 0.5, 0.5), 15, 0.2, 0.2, 0.2, Material.MOSSY_COBBLESTONE.createBlockData());
+                    block.getWorld().playSound(block.getLocation(), Sound.BLOCK_STONE_BREAK, 1.0f, 1.2f);
+
+                    clearDamage(block);
+                    activeBlocks.remove(blockLoc);
+                    cancel();
+                }
+            }
+        }.runTaskTimer(plugin, 0, damageAnimationInterval).getTaskId(); // config値で周期を制御
+
+        activeBlocks.put(blockLoc, taskId);
+    }
+
+    // ひびをリセットするためのヘルパーメソッド
+    private void clearDamage(org.bukkit.block.Block block) {
+        block.getWorld().getPlayers().forEach(p -> p.sendBlockDamage(block.getLocation(), 0.0f));
+    }
+
+    @EventHandler
+    public void onBlockBreak(BlockBreakEvent event) {
+        // 設置した一時ブロック（苔石）をプレイヤーが壊した場合
+        if (event.getBlock().getType() == Material.MOSSY_COBBLESTONE) {
+            Location loc = event.getBlock().getLocation();
+            if (activeBlocks.containsKey(loc)) {
+                // ドロップを無効にして破壊
+                event.setDropItems(false);
+                // タスクをキャンセルしてから削除
+                Bukkit.getScheduler().cancelTask(activeBlocks.get(loc));
+                activeBlocks.remove(loc);
+                // ひびのパケットをリセット
+                event.getBlock().getWorld().getPlayers().forEach(p -> p.sendBlockDamage(event.getBlock().getLocation(), 0.0f));
+            }
+        }
     }
 
     // --- 11. 装備拾得AI (全モンスター対象) ---
@@ -912,7 +1568,7 @@ public class EnchantedMobSystem implements Listener {
 
                 // 2. 周囲に良い装備がないか探す（既にターゲットがある場合はスキップして節約）
                 if (targetItem == null) {
-                    for (Entity e : monster.getNearbyEntities(6, 3, 6)) {
+                    for (Entity e : monster.getNearbyEntities(equipmentDetectionRange, equipmentDetectionRange / 2, equipmentDetectionRange)) {
                         if (e instanceof Item item && isEquipment(item.getItemStack().getType())) {
                             targetItem = item;
                             break;
@@ -928,11 +1584,52 @@ public class EnchantedMobSystem implements Listener {
 
                     if (distance > 0.5) {
                         // Velocityを使わず、バニラのAIに座標を指定して歩かせる
-                        monster.getPathfinder().moveTo(targetItem.getLocation(), 1.2);
+                        monster.getPathfinder().moveTo(targetItem.getLocation(), baseSpeed);
                     }
                 }
             }
-        }.runTaskTimer(plugin, 0, 10); // 判定を少し早める(0.5秒毎)と反応が自然になります
+        };
+
+        org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
+            private Item targetItem = null;
+
+            @Override
+            public void run() {
+                if (!monster.isValid() || monster.isDead()) {
+                    cancel();
+                    return;
+                }
+
+                // 1. ターゲットアイテムが有効か確認（誰かに拾われたり消えていないか）
+                if (targetItem != null && (!targetItem.isValid() || targetItem.isDead())) {
+                    targetItem = null;
+                }
+
+                // 2. 周囲に良い装備がないか探す（既にターゲットがある場合はスキップして節約）
+                if (targetItem == null) {
+                    for (Entity e : monster.getNearbyEntities(equipmentDetectionRange, equipmentDetectionRange / 2, equipmentDetectionRange)) {
+                        if (e instanceof Item item && isEquipment(item.getItemStack().getType())) {
+                            targetItem = item;
+                            break;
+                        }
+                    }
+                }
+
+                // 3. アイテムへ向かって「歩く」指示
+                if (targetItem != null) {
+                    // ターゲットを攻撃中ならアイテムを優先するか判断（ここではアイテムを優先）
+                    // 距離が近ければ移動、遠ければ現在のターゲットを維持
+                    double distance = monster.getLocation().distance(targetItem.getLocation());
+
+                    if (distance > 0.5) {
+                        // Velocityを使わず、バニラのAIに座標を指定して歩かせる
+                        monster.getPathfinder().moveTo(targetItem.getLocation(), baseSpeed);
+                    }
+                }
+            }
+        }.runTaskTimer(plugin, 0, lootingAiInterval); // 判定周期をconfig値で制御
+
+        registerMobTask(monster, t.getTaskId());
     }
 
     // 判定用の補助メソッド
@@ -980,14 +1677,14 @@ public class EnchantedMobSystem implements Listener {
                     isLeaping = false;
                 }
 
-                // 3. 突進の発動条件 (5～12ブロック)
-                if (dist > 5 && dist < 12 && !isLeaping) {
+                // 3. 突進の発動条件 (config値の範囲)
+                if (dist > creeperBurstMinDistance && dist < creeperBurstMaxDistance && !isLeaping) {
                     // ターゲットへの方向を計算
                     Vector toTarget = tLoc.toVector().subtract(cLoc.toVector()).normalize();
 
                     // 物理的な「打ち出し」
                     // XZ平面に強い推進力、Y軸にふんわり浮き上がる力を加える
-                    Vector leapVel = toTarget.multiply(1.4).setY(0.4);
+                    Vector leapVel = toTarget.multiply(creeperBurstSpeed).setY(creeperBurstVerticalPower);
                     creeper.setVelocity(leapVel);
 
                     // 4. 【演出】ウィンドチャージの爆風
@@ -997,10 +1694,111 @@ public class EnchantedMobSystem implements Listener {
                     creeper.getWorld().playSound(burstLoc, Sound.ENTITY_WIND_CHARGE_THROW, 1.0f, 1.2f);
 
                     isLeaping = true;
-                    cooldown = 40; // 約2秒後に再挑戦可能
+                    cooldown = creeperBurstCooldown; // config値でクールダウンを制御
                 }
             }
         }.runTaskTimer(plugin, 0, 2); // 判定精度を上げて接触検知を確実にする
+    }
+    // EnchantedMobSystemクラス内に追加するメソッド
+    public void cleanup() {
+        // 残っている一時ブロックを全て消去
+        for (Location loc : new ArrayList<>(activeBlocks.keySet())) {
+            org.bukkit.block.Block block = loc.getBlock();
+            if (block.getType() == Material.MOSSY_COBBLESTONE) {
+                block.setType(Material.AIR);
+            }
+        }
+        activeBlocks.clear();
+        occupiedBlocks.clear();
+    }
+
+    public void disable() {
+        // キャンプファイアタスク停止
+        if (campfireTask != null) {
+            campfireTask.cancel();
+            campfireTask = null;
+        }
+
+        // 全モブの登録タスクをキャンセル
+        for (java.util.UUID uid : new java.util.ArrayList<>(mobTasks.keySet())) {
+            java.util.List<Integer> ids = mobTasks.remove(uid);
+            if (ids != null) ids.forEach(id -> Bukkit.getScheduler().cancelTask(id));
+        }
+
+        cleanup();
+        org.bukkit.event.HandlerList.unregisterAll(this);
+    }
+
+    public void enable() {
+        plugin.getServer().getPluginManager().registerEvents(this, plugin);
+        if (campfireTask == null) startCampfireHealingTask();
+        rescheduleAllEnchantedMobs();
+    }
+    // コンストラクタに追加、または初期化時に呼び出し
+    public void startCampfireHealingTask() {
+        campfireTask = new BukkitRunnable() {
+            @Override
+            public void run() {
+                // 全世界で焚き火を探すと重いため、オンラインプレイヤーの周囲のみをスキャン
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    Location loc = player.getLocation();
+
+                    // プレイヤーの周囲のブロックを確認
+                    int radius = (int) campfireScanRange;
+                    for (int x = -radius; x <= radius; x++) {
+                        for (int y = -2; y <= 2; y++) {
+                            for (int z = -radius; z <= radius; z++) {
+                                org.bukkit.block.Block block = loc.clone().add(x, y, z).getBlock();
+
+                                // 焚き火（火がついているもの）を発見
+                                if (block.getType() == Material.CAMPFIRE || block.getType() == Material.SOUL_CAMPFIRE) {
+                                    org.bukkit.block.data.type.Campfire data = (org.bukkit.block.data.type.Campfire) block.getBlockData();
+                                    if (data.isLit()) {
+                                        applyCampfireHeal(block.getLocation());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }.runTaskTimer(plugin, 0, campfireTaskInterval); // config値でタスク周期を制御
+    }
+
+    private void applyCampfireHeal(Location fireLoc) {
+        // 統一された回復量をconfig値から取得
+        double healAmount = campfireHealAmount;
+
+        // 焚き火の周囲のエンティティを確認
+        for (Entity entity : fireLoc.getWorld().getNearbyEntities(fireLoc, campfireScanRange, campfireScanHeight, campfireScanRange)) {
+            // プレイヤーのみを対象にする
+            if (entity instanceof Player player) {
+                // サバイバルまたはアドベンチャーモードのプレイヤーのみ対象
+                if (player.getGameMode() == GameMode.SURVIVAL || player.getGameMode() == GameMode.ADVENTURE) {
+
+                    double maxHp = player.getAttribute(Attribute.MAX_HEALTH).getValue();
+
+                    // 現在の体力が最大体力未満の場合のみ回復
+                    if (player.getHealth() < maxHp) {
+                        double newHealth = Math.min(maxHp, player.getHealth() + healAmount);
+                        player.setHealth(newHealth);
+
+                        // --- 演出の統一 ---
+                        // 統一された演出（パーティクル）を表示
+                        player.getWorld().spawnParticle(
+                                Particle.HAPPY_VILLAGER,
+                                player.getLocation().add(0, 1.2, 0),
+                                10,           // 粒の数
+                                0.3, 0.5, 0.35, // 広がり
+                                0.35           // 速度
+                        );
+
+                        // 統一された回復音（必要に応じて追加）
+
+                    }
+                }
+            }
+        }
     }
 
 }

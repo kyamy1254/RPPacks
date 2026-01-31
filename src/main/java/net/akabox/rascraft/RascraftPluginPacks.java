@@ -35,6 +35,9 @@ public class RascraftPluginPacks extends JavaPlugin {
     private FileConfiguration langConfig;
     private double healthViewDistance;
     private EnchantedMobSystem mobSystem;
+    private EntityHealthSystem entityHealthSystem;
+    private boolean enchantedMobsEnabled;
+    private boolean entityHealthEnabled;
 
     @Override
     public void onEnable() {
@@ -43,8 +46,6 @@ public class RascraftPluginPacks extends JavaPlugin {
         createLangFile();
         loadConfiguration();
         loadPlayerData();
-        this.mobSystem = new EnchantedMobSystem(this);
-
         org.bukkit.command.ConsoleCommandSender console = getServer().getConsoleSender();
         String version = getDescription().getVersion();
         String authors = String.join(", ", getDescription().getAuthors());
@@ -60,16 +61,42 @@ public class RascraftPluginPacks extends JavaPlugin {
         console.sendMessage("§a   Successfully enabled. Developed by §f" + authors);
         console.sendMessage("§e==================================================");
 
+        this.mobSystem = new EnchantedMobSystem(this);
+        this.entityHealthSystem = new EntityHealthSystem(this);
+
         getServer().getPluginManager().registerEvents(new SneakListener(this), this);
         getServer().getPluginManager().registerEvents(new TrailListener(this), this);
         getServer().getPluginManager().registerEvents(new MenuListener(this), this);
         getServer().getPluginManager().registerEvents(new TeleportListener(this), this);
-        getServer().getPluginManager().registerEvents(new EntityHealthSystem(this), this);
-        getServer().getPluginManager().registerEvents(new EnchantedMobSystem(this), this);
+
+        // 構成で有効かどうかを判定してリスナーを登録
+        if (enchantedMobsEnabled) {
+            getServer().getPluginManager().registerEvents(this.mobSystem, this);
+        }
+        if (entityHealthEnabled) {
+            getServer().getPluginManager().registerEvents(this.entityHealthSystem, this);
+        }
 
         RasPluginCommand cmd = new RasPluginCommand(this);
         getCommand("rppacks").setExecutor(cmd);
         getCommand("rppacks").setTabCompleter(cmd);
+    }
+
+    @Override
+    public void onDisable() {
+        // 【重要】メモリリーク・ゴミブロック対策
+        // プラグインが終了する際、設置した苔石などを全てAIRに戻します
+        if (this.mobSystem != null) {
+            this.mobSystem.disable();
+        }
+        if (this.entityHealthSystem != null) {
+            this.entityHealthSystem.disable();
+        }
+
+        // プレイヤーデータの保存
+        savePlayerData();
+
+        getLogger().info("RPPacks has been safely disabled.");
     }
 
     private void createPlayerDataFile() {
@@ -156,6 +183,9 @@ public class RascraftPluginPacks extends JavaPlugin {
         tpEffectEnabled = config.getBoolean("teleport-effect.enabled", true);
 
         this.healthViewDistance = config.getDouble("features.health-bar.view-distance", 8.0);
+        // 機能フラグの読み込み
+        this.enchantedMobsEnabled = config.getBoolean("features.enchanted-mobs.enabled", true);
+        this.entityHealthEnabled = config.getBoolean("features.entity-health.enabled", true);
     }
 
     private void parseEffectList(List<String> source, List<String> target) {
@@ -209,6 +239,44 @@ public class RascraftPluginPacks extends JavaPlugin {
 
     public EnchantedMobSystem getMobSystem() {
         return mobSystem;
+    }
+
+    public EntityHealthSystem getEntityHealthSystem() {
+        return entityHealthSystem;
+    }
+
+    public boolean isEnchantedMobsEnabled() {
+        return enchantedMobsEnabled;
+    }
+
+    public void setEnchantedMobsEnabled(boolean enabled) {
+        if (this.enchantedMobsEnabled == enabled) return;
+        this.enchantedMobsEnabled = enabled;
+        if (!enabled) {
+            if (this.mobSystem != null) this.mobSystem.disable();
+        } else {
+            if (this.mobSystem != null) {
+                getServer().getPluginManager().registerEvents(this.mobSystem, this);
+                this.mobSystem.reloadConfiguration();
+            }
+        }
+    }
+
+    public boolean isEntityHealthEnabled() {
+        return entityHealthEnabled;
+    }
+
+    public void setEntityHealthEnabled(boolean enabled) {
+        if (this.entityHealthEnabled == enabled) return;
+        this.entityHealthEnabled = enabled;
+        if (!enabled) {
+            if (this.entityHealthSystem != null) this.entityHealthSystem.disable();
+        } else {
+            if (this.entityHealthSystem != null) {
+                getServer().getPluginManager().registerEvents(this.entityHealthSystem, this);
+                this.entityHealthSystem.enable();
+            }
+        }
     }
 
     public long getEquippedPlayerCount() {

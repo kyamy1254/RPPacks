@@ -153,18 +153,190 @@ teleport-effect:
   # ワープ先: 到着時のエフェクト
   to-particle: "trial_spawner_detection_ominous"
 
-  features:
-    # ダメージ・回復インジケーターの設定
-    damage-indicator:
-      enabled: true        # インジケーター全体の有効化/無効化
-      share-continuous-damage:
-        enabled: true
-        range: 16.0
-      # ※表示ロジックは統合済み：攻撃/回復を与えた本人にのみ表示されます
 
-    # アクションバーHPゲージの設定
-    health-bar:
-      enabled: true        # HPゲージ全体の有効化/無効化
-      view-distance: 96.0   # 視線判定（RayTrace）でMOBを認識する距離
-      display-ticks: 15    # 攻撃後にゲージを維持する時間 (20ticks = 1秒)
+# --- Enchanted Mobs Configuration (強化モンスター設定) ---
+enchanted-mobs:
+  # スポーン時にEnchanted化する確率 (0.0 ～ 1.0)
+  enchanted-spawn-chance: 0.15
+
+  # ステータス調整
+  stats:
+    # Enchanted MobのHP倍率
+    hp-multiplier: 2.5
+    # Enchanted Mobの移動速度 (デフォルト0.1)
+    movement-speed: 0.275
+
+  # パーティクル設定
+  particles:
+    # ビジュアルオーラのタスク周期（ティック単位。4 = 0.2秒）
+    aura-update-interval: 4
+    # 螺旋パーティクルの角度増加量
+    spiral-angle-increment: 0.4
+    # 螺旋パーティクルの半径
+    spiral-radius: 0.6
+
+  # ナビゲーション AI
+  navigation:
+    # 感知範囲（ブロック）
+    detection-range: 48.0
+    # 基本移動速度
+    base-speed: 1.2
+    # 遠距離判定（ブロック以上で速く移動）
+    far-distance-threshold: 20
+    far-distance-speed: 1.6
+    # 近距離判定（ブロック以下で執着強化）
+    close-distance-threshold: 6
+    close-distance-speed: 1.3
+    # スタック解決の待機時間（ティック）
+    stuck-ticks-threshold: 15
+    stuck-jump-power: 0.4
+    stuck-jump-horizontal: 0.2
+
+  # スケルトン設定
+  skeleton:
+    # 矢の速度倍率
+    arrow-speed-multiplier: 1.4
+    # ホーミング矢の発射確率
+    homing-arrow-chance: 0.10
+    # ホーミング矢の速度
+    homing-arrow-speed: 0.4
+
+  # ゾンビ設定
+  zombie:
+    # 指揮官オーラの範囲
+    commander-aura-range: 16
+    # 指揮官オーラの高さ
+    commander-aura-height: 8
+    # 呼び声AIのタスク周期（ティック）
+    swarm-aura-interval: 40
+    # 呼び声AIの探知範囲
+    swarm-detection-range: 15
+    # 増援召喚の体力閾値
+    reinforcement-hp-threshold: 10.0
+    # 増援召喚確率
+    reinforcement-spawn-chance: 0.25
+    # 召喚される増援の数（最小～最大）
+    reinforcement-count-min: 2
+    reinforcement-count-max: 5
+    # Enchanted増援になる確率
+    enchanted-reinforcement-chance: 0.05
+    # 增援召喚時の最大距離（ブロック）
+    reinforcement-spawn-distance: 3
+
+  # クリーパー設定
+  creeper:
+    # 基本速度
+    base-movement-speed: 0.25
+    # 背後フェイズの速度増加
+    backstab-speed: 0.45
+    # サイドステップの力
+    sidestep-force: 0.5
+    # 視認判定の閾値 (0.98 = ほぼ向いている)
+    visibility-threshold: 0.98
+    # 視認判定の範囲
+    vision-range: 15
+    # 不意打ち判定距離
+    backstab-distance: 3.0
+    # サイドステップ判定距離
+    sidestep-distance: 15
+    # バースト突進の範囲（最小～最大）
+    burst-min-distance: 5
+    burst-max-distance: 12
+    # バースト突進の速度
+    burst-speed: 1.4
+    # バースト突進の垂直力
+    burst-vertical-power: 0.4
+    # バースト突進のクールダウン（ティック）
+    burst-cooldown: 40
+
+  # クモ設定
+  spider:
+    # 壁登りの推進力
+    wall-climb-force: 0.15
+    # 壁登りの垂直力
+    wall-climb-vertical: 0.25
+    # 壁登り判定の高さ差
+    wall-climb-height-diff: 1
+    # 飛びかかり範囲（最小～最大）
+    leap-min-distance: 5
+    leap-max-distance: 10
+    # 飛びかかりの速度
+    leap-speed: 1.2
+    # 飛びかかりの確率（% ）
+    leap-chance: 0.2
+    # ウェブトラップの有効期間（ティック）
+    web-trap-duration: 60
+    # 周囲スパイダー呼び出し範囲
+    swarm-call-range: 20
+    swarm-call-height: 10
+
+  # クリーパー毒ガス爆発の設定
+  creeper-poison:
+    # 毒ガス雲の初期半径
+    cloud-radius: 4.0
+    # 毒ガス雲の持続時間（ティック）
+    cloud-duration: 200
+    # 毒ガス雲の半径減少量（接触時）
+    cloud-radius-on-use: -0.1
+
+  # 建築AI
+  climbing:
+    # 移動スピード
+    climbing-speed: 1.2
+    # スタック検知閾値
+    stuck-distance-threshold: 0.1
+    # スタック判定ティック
+    stuck-tick-limit: 5
+    # 建築判定の先読み距離
+    lookahead-distance: 1.6
+    # 垂直建築の高さ判定
+    vertical-build-height: 2.5
+    # 垂直建築の近さ判定
+    vertical-build-close-distance: 1.5
+    # 橋渡しの最小距離
+    bridge-min-distance: 1.5
+    # 一時ブロック（苔石）の消去時間（ティック）
+    temporary-block-duration: 100
+    # ひび割れアニメーションのタスク周期（ティック）
+    damage-animation-interval: 10
+
+  # 拾得AI
+  looting:
+    # 装備拾得範囲（ブロック）
+    equipment-detection-range: 6
+    # 装備拾得のタスク周期（ティック）
+    looting-ai-interval: 10
+
+  # キャンプファイア回復設定
+  campfire-healing:
+    # 回復量（ハート値）
+    heal-amount: 2.0
+    # スキャン範囲（ブロック）
+    scan-range: 5
+    # スキャン高さ
+    scan-height: 3
+    # タスク周期（ティック）
+    task-interval: 40
+ 
+features:
+  # ダメージ・回復インジケーターの設定
+  damage-indicator:
+    enabled: true        # インジケーター全体の有効化/無効化
+    share-continuous-damage:
+      enabled: true
+      range: 16.0
+    # ※表示ロジックは統合済み：攻撃/回復を与えた本人にのみ表示されます
+
+  # アクションバーHPゲージの設定
+  health-bar:
+    enabled: true        # HPゲージ全体の有効化/無効化
+    view-distance: 96.0   # 視線判定（RayTrace）でMOBを認識する距離
+    display-ticks: 15    # 攻撃後にゲージを維持する時間 (20ticks = 1秒)
+  # Enchanted Mobs 機能の有効化フラグ
+  enchanted-mobs:
+    enabled: true
+
+  # Entity Health System 全体を有効/無効にする
+  entity-health:
+    enabled: true
 

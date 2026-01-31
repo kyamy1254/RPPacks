@@ -6,7 +6,7 @@
 
     <groupId>net.akabox.rascraft</groupId>
     <artifactId>RPPacks</artifactId>
-    <version>1.2.0-B</version>
+    <version>1.2.0b-B</version>
 
     <properties>
         <java.version>21</java.version>
