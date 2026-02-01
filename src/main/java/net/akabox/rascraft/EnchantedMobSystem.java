@@ -33,6 +33,7 @@ public class EnchantedMobSystem implements Listener {
     private final Random random = new Random();
     private final NamespacedKey reinforcedKey;
     private final java.util.Map<Location, Integer> activeBlocks = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<Location, java.util.concurrent.atomic.AtomicInteger> activeDamageStage = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Map<Location, java.util.UUID> occupiedBlocks = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Map<java.util.UUID, java.util.List<Integer>> mobTasks = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -1463,50 +1464,52 @@ public class EnchantedMobSystem implements Listener {
 
     private void refreshTemporaryBlock(Location blockLoc) {
         org.bukkit.block.Block block = blockLoc.getBlock();
-        // 既存タスクのクリーンアップ
-        if (activeBlocks.containsKey(blockLoc)) {
-            Bukkit.getScheduler().cancelTask(activeBlocks.get(blockLoc));
-            activeBlocks.remove(blockLoc);
-            // ひびを完全に消去
-            block.getWorld().getPlayers().forEach(p -> p.sendBlockDamage(block.getLocation(), 0.0f));
-        } else {
-            if (block.getType() == Material.AIR) {
-                block.setType(Material.MOSSY_COBBLESTONE);
-                block.getWorld().playSound(block.getLocation(), Sound.BLOCK_STONE_PLACE, 0.5f, 0.8f);
-            }
+        // ブロックが未設置なら設置してダメージステージを初期化
+        if (block.getType() == Material.AIR) {
+            block.setType(Material.MOSSY_COBBLESTONE);
+            block.getWorld().playSound(block.getLocation(), Sound.BLOCK_STONE_PLACE, 0.5f, 0.8f);
         }
 
-        // ひび割れアニメーションタスク 
-        int taskId = new BukkitRunnable() {
-            int damageStage = 0; // 0から9までの段階
+        // 既にアニメーション中ならダメージステージを加算して累積させる
+        if (activeBlocks.containsKey(blockLoc)) {
+            activeDamageStage.computeIfAbsent(blockLoc, k -> new java.util.concurrent.atomic.AtomicInteger(0)).addAndGet(1);
+            return;
+        }
 
+        // 新規アニメーションを開始（shared な AtomicInteger を使用）
+        java.util.concurrent.atomic.AtomicInteger stage = new java.util.concurrent.atomic.AtomicInteger(0);
+        activeDamageStage.put(blockLoc, stage);
+
+        int taskId = new BukkitRunnable() {
             @Override
             public void run() {
                 if (block.getType() != Material.MOSSY_COBBLESTONE) {
                     clearDamage(block);
                     activeBlocks.remove(blockLoc);
+                    activeDamageStage.remove(blockLoc);
                     cancel();
                     return;
                 }
 
-                // --- ひびを段階的に送る (0.0f ~ 0.9f) ---
-                float progress = damageStage / 10.0f;
+                int damageStage = stage.getAndIncrement(); // スレッドセーフに取得して増加
+
+                // progress は 0.0f ～ 1.0f（11段階）
+                float progress = Math.min(1.0f, damageStage / 10.0f);
                 block.getWorld().getPlayers().forEach(p -> p.sendBlockDamage(block.getLocation(), progress));
 
-                damageStage++;
-
-                // 完全に消去される時点で削除
-                if (damageStage > 10) {
+                // 完全に破壊する段階に到達したら消去処理
+                if (damageStage >= 10) {
                     block.setType(Material.AIR);
                     block.getWorld().spawnParticle(Particle.BLOCK, block.getLocation().add(0.5, 0.5, 0.5), 15, 0.2, 0.2, 0.2, Material.MOSSY_COBBLESTONE.createBlockData());
                     block.getWorld().playSound(block.getLocation(), Sound.BLOCK_STONE_BREAK, 1.0f, 1.2f);
 
                     clearDamage(block);
                     activeBlocks.remove(blockLoc);
+                    activeDamageStage.remove(blockLoc);
                     cancel();
                 }
             }
-        }.runTaskTimer(plugin, 0, damageAnimationInterval).getTaskId(); // config値で周期を制御
+        }.runTaskTimer(plugin, 0, damageAnimationInterval).getTaskId();
 
         activeBlocks.put(blockLoc, taskId);
     }
@@ -1514,6 +1517,8 @@ public class EnchantedMobSystem implements Listener {
     // ひびをリセットするためのヘルパーメソッド
     private void clearDamage(org.bukkit.block.Block block) {
         block.getWorld().getPlayers().forEach(p -> p.sendBlockDamage(block.getLocation(), 0.0f));
+        // ダメージステージが残っていればクリーンアップ
+        activeDamageStage.remove(block.getLocation());
     }
 
     @EventHandler

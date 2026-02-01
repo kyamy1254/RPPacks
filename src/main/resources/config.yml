@@ -1,13 +1,20 @@
 # ================================================================
-# RPPacks - General Configuration
+# RPPacks - Plugin Configuration
+# ================================================================
+# このファイルを編集して /rpp reload でプラグインをリロードしてください
+# 各機能の有効化・無効化や動作パラメータを設定します
+
+# ================================================================
+# セクション 1: プレイヤー機能（共通設定）
 # ================================================================
 
-# --- Sneak Grow (スニーク成長機能) ---
-# 作物の近くでスニークすると成長を促進します。
+# --- スニーク成長 (Sneak Grow) ---
+# 説明: 作物の近くでスニークすると成長を促進します
+# コマンド: /rpp sneakgrow <enable|disable|set>
 sneak-grow:
   enabled: true
-  success-chance: 0.8  # 成功確率 (0.0 ～ 1.0)
-  radius: 1            # 影響範囲の半径 (1 = 3x3)
+  success-chance: 0.8            # 成功確率 (0.0 ～ 1.0)
+  radius: 1                      # 影響範囲の半径 (1 = 3x3)
 
   # 成長方式の定義
   # AGEABLE: 段階的に成長 (小麦等)
@@ -48,13 +55,15 @@ sneak-grow:
     WILDFLOWERS: BONEMEAL
     KELP: BONEMEAL
 
-# --- Footprint Trail (足あとエフェクト機能) ---
+# --- 足あとエフェクト (Footprint Trail) ---
+# 説明: プレイヤーが移動するときに足あとのパーティクルを表示します
+# コマンド: /rpp trail [enable|disable|check]
 footprint-trail:
-  density: 2    # デフォルトの密度
-  interval: 0.2 # エフェクト発生の移動間隔
+  enabled: true
+  density: 2                     # デフォルトの密度
+  interval: 0.2                  # エフェクト発生の移動間隔（ブロック）
 
   # 一般プレイヤーが使用可能なエフェクト
-  # 書式: エフェクト名 または エフェクト名:密度
   allowed-effects:
     - FLAME:2
     - VILLAGER_HAPPY:5
@@ -108,235 +117,176 @@ footprint-trail:
     PORTAL: "ENDER_PEARL"
     REDSTONE_DUST: "REDSTONE"
     SNOWBALL: "SNOWBALL"
-    SOUL_FIRE_FLAME: "SOUL_CAMPFIRE"
+    SOUL_FIRE_FLAME: "SOUL_LANTERN"
     TOTEM: "TOTEM_OF_UNDYING"
     VILLAGER_HAPPY: "EMERALD"
     WAX_ON: "HONEYCOMB"
-    WITCH: "WITCH_SPAWN_EGG"
-    DEFAULT: "FIREWORK_STAR"
+    WITCH: "POTION"
 
-# --- Sound Settings ---
-# 各アクション時の効果音設定
-# サウンド名一覧: https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Sound.html
-# ※ "block.note_block.iron_xylophone" のようなドット形式を推奨します。
+# --- テレポートエフェクト設定 (Teleport Effect) ---
+# 説明: テレポート時に視覚的なパーティクルエフェクトを表示します
+# コマンド: /rpp tpeffect <enable|disable>
+teleport-effect:
+  enabled: true
+  delay-ticks: 10                # 実行までの遅延（ティック）、10 = 0.5秒
+  from-particle: "trial_spawner_detection"      # ワープ元: 離脱時のエフェクト
+  to-particle: "trial_spawner_detection_ominous"  # ワープ先: 到着時のエフェクト
+
+# --- 効果音設定 (Sound Settings) ---
+# 説明: 各アクション時に再生される効果音を設定します
+# サウンド一覧: https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Sound.html
 sounds:
   gui:
-    # エフェクト装備成功時
-    equip-success:
+    equip-success:                # エフェクト装備成功時
       name: "entity.experience_orb.pickup"
       volume: 1.0
       pitch: 1.0
-    # 権限不足などで失敗した時
-    equip-fail:
+    equip-fail:                   # 権限不足などで失敗した時
       name: "entity.villager.no"
       volume: 1.0
       pitch: 1.0
-    # ページ移動クリック時
-    page-change:
+    page-change:                  # ページ移動クリック時
       name: "item.book.page_turn"
       volume: 1.0
       pitch: 1.0
-    # エフェクトを解除（BARRIERクリック）した時
-    effect-off:
+    effect-off:                   # エフェクトを解除（BARRIERクリック）した時
       name: "block.note_block.iron_xylophone"
       volume: 1.0
       pitch: 0.75
 
-# --- Teleport Effect Settings ---
-teleport-effect:
-  enabled: true
-  # 実行までの遅延（ティック単位）。長距離ワープで表示されない場合は増やす（10L = 0.5秒）
-  delay-ticks: 10
-  # 使用するパーティクルの名前（Minecraftの識別子）
-  # ワープ元: 離脱時のエフェクト
-  from-particle: "trial_spawner_detection"
-  # ワープ先: 到着時のエフェクト
-  to-particle: "trial_spawner_detection_ominous"
+# ================================================================
+# セクション 2: エンティティ / モブ機能
+# ================================================================
 
-
-# --- Enchanted Mobs Configuration (強化モンスター設定) ---
+# --- エンチャントモブ (Enchanted Mobs) ---
+# 説明: モンスターを強化し、高度なAIと視覚効果を付与します
+# コマンド: /rpp enchantedmobs <enable|disable>
 enchanted-mobs:
-  # スポーン時にEnchanted化する確率 (0.0 ～ 1.0)
-  enchanted-spawn-chance: 0.15
-
-  # ステータス調整
+  enabled: true
+  
+  # ===== 基本設定 =====
+  enchanted-spawn-chance: 0.15   # スポーン時にEnchanted化する確率 (0.0 ~ 1.0)
+  
+  # ===== ステータス調整 =====
   stats:
-    # Enchanted MobのHP倍率
-    hp-multiplier: 2.5
-    # Enchanted Mobの移動速度 (デフォルト0.1)
-    movement-speed: 0.275
-
-  # パーティクル設定
+    hp-multiplier: 2.5           # HP倍率
+    movement-speed: 0.275        # 移動速度（デフォルト 0.1）
+  
+  # ===== ビジュアル設定 =====
   particles:
-    # ビジュアルオーラのタスク周期（ティック単位。4 = 0.2秒）
-    aura-update-interval: 4
-    # 螺旋パーティクルの角度増加量
-    spiral-angle-increment: 0.4
-    # 螺旋パーティクルの半径
-    spiral-radius: 0.6
-
-  # ナビゲーション AI
+    aura-update-interval: 4       # ビジュアルオーラのタスク周期（ティック）
+    spiral-angle-increment: 0.4   # 螺旋パーティクルの角度増加量
+    spiral-radius: 0.6            # 螺旋パーティクルの半径
+  
+  # ===== ナビゲーション AI =====
   navigation:
-    # 感知範囲（ブロック）
-    detection-range: 48.0
-    # 基本移動速度
-    base-speed: 1.2
-    # 遠距離判定（ブロック以上で速く移動）
-    far-distance-threshold: 20
-    far-distance-speed: 1.6
-    # 近距離判定（ブロック以下で執着強化）
-    close-distance-threshold: 6
-    close-distance-speed: 1.3
-    # スタック解決の待機時間（ティック）
-    stuck-ticks-threshold: 15
-    stuck-jump-power: 0.4
-    stuck-jump-horizontal: 0.2
-
-  # スケルトン設定
+    detection-range: 48.0         # 感知範囲（ブロック）
+    base-speed: 1.2               # 基本移動速度
+    far-distance-threshold: 20    # 遠距離判定（ブロック以上で速く移動）
+    far-distance-speed: 1.6       # 遠距離時の移動速度
+    close-distance-threshold: 6   # 近距離判定（ブロック以下で執着強化）
+    close-distance-speed: 1.3     # 近距離時の移動速度
+    stuck-ticks-threshold: 15     # スタック解決の待機時間（ティック）
+    stuck-jump-power: 0.4         # スタック時のジャンプ力
+    stuck-jump-horizontal: 0.2    # スタック時の水平移動
+  
+  # ===== スケルトン設定 =====
   skeleton:
-    # 矢の速度倍率
-    arrow-speed-multiplier: 1.4
-    # ホーミング矢の発射確率
-    homing-arrow-chance: 0.10
-    # ホーミング矢の速度
-    homing-arrow-speed: 0.4
-
-  # ゾンビ設定
+    arrow-speed-multiplier: 1.4   # 矢の速度倍率
+    homing-arrow-chance: 0.10     # ホーミング矢の発射確率
+    homing-arrow-speed: 0.4       # ホーミング矢の速度
+  
+  # ===== ゾンビ設定 =====
   zombie:
-    # 指揮官オーラの範囲
-    commander-aura-range: 16
-    # 指揮官オーラの高さ
-    commander-aura-height: 8
-    # 呼び声AIのタスク周期（ティック）
-    swarm-aura-interval: 40
-    # 呼び声AIの探知範囲
-    swarm-detection-range: 15
-    # 増援召喚の体力閾値
-    reinforcement-hp-threshold: 10.0
-    # 増援召喚確率
-    reinforcement-spawn-chance: 0.25
-    # 召喚される増援の数（最小～最大）
-    reinforcement-count-min: 2
-    reinforcement-count-max: 5
-    # Enchanted増援になる確率
-    enchanted-reinforcement-chance: 0.05
-    # 增援召喚時の最大距離（ブロック）
-    reinforcement-spawn-distance: 3
-
-  # クリーパー設定
+    commander-aura-range: 16      # 指揮官オーラの範囲
+    commander-aura-height: 8      # 指揮官オーラの高さ
+    swarm-aura-interval: 40       # 呼び声AIのタスク周期（ティック）
+    swarm-detection-range: 15     # 呼び声AIの探知範囲
+    reinforcement-hp-threshold: 10.0  # 増援召喚の体力閾値
+    reinforcement-spawn-chance: 0.25  # 増援召喚確率
+    reinforcement-count-min: 2    # 召喚される増援の数（最小）
+    reinforcement-count-max: 5    # 召喚される増援の数（最大）
+    enchanted-reinforcement-chance: 0.05  # Enchanted増援になる確率
+    reinforcement-spawn-distance: 3  # 増援召喚時の距離
+  
+  # ===== クリーパー設定 =====
   creeper:
-    # 基本速度
-    base-movement-speed: 0.25
-    # 背後フェイズの速度増加
-    backstab-speed: 0.45
-    # サイドステップの力
-    sidestep-force: 0.5
-    # 視認判定の閾値 (0.98 = ほぼ向いている)
-    visibility-threshold: 0.98
-    # 視認判定の範囲
-    vision-range: 15
-    # 不意打ち判定距離
-    backstab-distance: 3.0
-    # サイドステップ判定距離
-    sidestep-distance: 15
-    # バースト突進の範囲（最小～最大）
-    burst-min-distance: 5
-    burst-max-distance: 12
-    # バースト突進の速度
-    burst-speed: 1.4
-    # バースト突進の垂直力
-    burst-vertical-power: 0.4
-    # バースト突進のクールダウン（ティック）
-    burst-cooldown: 40
-
-  # クモ設定
+    base-movement-speed: 0.25     # 基本速度
+    backstab-speed: 0.45          # 背後フェイズの速度増加
+    sidestep-force: 0.5           # サイドステップの力
+    visibility-threshold: 0.98    # 視認判定の閾値 (0.98 = ほぼ向いている)
+    vision-range: 15              # 視認判定の範囲
+    backstab-distance: 3.0        # 不意打ち判定距離
+    sidestep-distance: 15         # サイドステップ判定距離
+    burst-min-distance: 5         # バースト突進の最小距離
+    burst-max-distance: 12        # バースト突進の最大距離
+    burst-speed: 1.4              # バースト突進の速度
+    burst-vertical-power: 0.4     # バースト突進の垂直力
+    burst-cooldown: 40            # バースト突進のクールダウン（ティック）
+  
+  # ===== クモ設定 =====
   spider:
-    # 壁登りの推進力
-    wall-climb-force: 0.15
-    # 壁登りの垂直力
-    wall-climb-vertical: 0.25
-    # 壁登り判定の高さ差
-    wall-climb-height-diff: 1
-    # 飛びかかり範囲（最小～最大）
-    leap-min-distance: 5
-    leap-max-distance: 10
-    # 飛びかかりの速度
-    leap-speed: 1.2
-    # 飛びかかりの確率（% ）
-    leap-chance: 0.2
-    # ウェブトラップの有効期間（ティック）
-    web-trap-duration: 60
-    # 周囲スパイダー呼び出し範囲
-    swarm-call-range: 20
-    swarm-call-height: 10
-
-  # クリーパー毒ガス爆発の設定
+    wall-climb-force: 0.15        # 壁登りの推進力
+    wall-climb-vertical: 0.25     # 壁登りの垂直力
+    wall-climb-height-diff: 1     # 壁登り判定の高さ差
+    leap-min-distance: 5          # 飛びかかり最小距離
+    leap-max-distance: 10         # 飛びかかり最大距離
+    leap-speed: 1.2               # 飛びかかりの速度
+    leap-chance: 0.2              # 飛びかかりの確率（0.0 ~ 1.0）
+    web-trap-duration: 60         # ウェブトラップの有効期間（ティック）
+    swarm-call-range: 20          # 周辺スパイダー呼び出し範囲
+    swarm-call-height: 10         # 周辺スパイダー呼び出し高さ
+  
+  # ===== クリーパー毒ガス爆発 =====
   creeper-poison:
-    # 毒ガス雲の初期半径
-    cloud-radius: 4.0
-    # 毒ガス雲の持続時間（ティック）
-    cloud-duration: 200
-    # 毒ガス雲の半径減少量（接触時）
-    cloud-radius-on-use: -0.1
-
-  # 建築AI
+    cloud-radius: 4.0             # 毒ガス雲の初期半径
+    cloud-duration: 200           # 毒ガス雲の持続時間（ティック）
+    cloud-radius-on-use: -0.1     # 毒ガス雲の半径減少量（接触時）
+  
+  # ===== 建築 AI =====
   climbing:
-    # 移動スピード
-    climbing-speed: 1.2
-    # スタック検知閾値
-    stuck-distance-threshold: 0.1
-    # スタック判定ティック
-    stuck-tick-limit: 5
-    # 建築判定の先読み距離
-    lookahead-distance: 1.6
-    # 垂直建築の高さ判定
-    vertical-build-height: 2.5
-    # 垂直建築の近さ判定
-    vertical-build-close-distance: 1.5
-    # 橋渡しの最小距離
-    bridge-min-distance: 1.5
-    # 一時ブロック（苔石）の消去時間（ティック）
-    temporary-block-duration: 100
-    # ひび割れアニメーションのタスク周期（ティック）
-    damage-animation-interval: 10
-
-  # 拾得AI
+    climbing-speed: 1.2           # 移動スピード
+    stuck-distance-threshold: 0.1 # スタック検知閾値
+    stuck-tick-limit: 5           # スタック判定ティック
+    lookahead-distance: 1.6       # 建築判定の先読み距離
+    vertical-build-height: 2.5    # 垂直建築の高さ判定
+    vertical-build-close-distance: 1.5  # 垂直建築の近さ判定
+    bridge-min-distance: 1.5      # 橋渡しの最小距離
+    temporary-block-duration: 100 # 一時ブロック（苔石）の消去時間（ティック）
+    damage-animation-interval: 10 # ひび割れアニメーションの周期（ティック）
+  
+  # ===== 拾得 AI =====
   looting:
-    # 装備拾得範囲（ブロック）
-    equipment-detection-range: 6
-    # 装備拾得のタスク周期（ティック）
-    looting-ai-interval: 10
-
-  # キャンプファイア回復設定
+    equipment-detection-range: 6  # 装備拾得範囲（ブロック）
+    looting-ai-interval: 10       # 装備拾得のタスク周期（ティック）
+  
+  # ===== キャンプファイア回復 =====
   campfire-healing:
-    # 回復量（ハート値）
-    heal-amount: 2.0
-    # スキャン範囲（ブロック）
-    scan-range: 5
-    # スキャン高さ
-    scan-height: 3
-    # タスク周期（ティック）
-    task-interval: 40
- 
+    heal-amount: 2.0              # 回復量（ハート値）
+    scan-range: 5                 # スキャン範囲（ブロック）
+    scan-height: 3                # スキャン高さ
+    task-interval: 40             # タスク周期（ティック）
+
+# ================================================================
+# セクション 3: 拡張機能（プレイヤー/エンティティ）
+# ================================================================
+
+# --- ダメージ・回復インジケーター (Damage Indicator) ---
+# 説明: ダメージ・回復を与えた攻撃対象に表示します
+damage-indicator:
+  share-continuous-damage:
+    range: 16.0                  # 共有表示範囲（ブロック）
+
+# --- HP ゲージ（アクションバー） (Health Bar) ---
+# 説明: ターゲット中のモブの体力をアクションバーに表示します
+health-bar:
+  view-distance: 96.0            # 視線判定（RayTrace）でモブを認識する距離（ブロック）
+  display-ticks: 15             # 攻撃後にゲージを維持する時間（ティック）、15 = 0.75秒
+
+# --- エンティティヘルスシステム統合フラグ ---
+# 説明: ダメージインジケーター＆HPゲージ機能全体を管理します
+# コマンド: /rpp entityhealth <enable|disable>
 features:
-  # ダメージ・回復インジケーターの設定
-  damage-indicator:
-    enabled: true        # インジケーター全体の有効化/無効化
-    share-continuous-damage:
-      enabled: true
-      range: 16.0
-    # ※表示ロジックは統合済み：攻撃/回復を与えた本人にのみ表示されます
-
-  # アクションバーHPゲージの設定
-  health-bar:
-    enabled: true        # HPゲージ全体の有効化/無効化
-    view-distance: 96.0   # 視線判定（RayTrace）でMOBを認識する距離
-    display-ticks: 15    # 攻撃後にゲージを維持する時間 (20ticks = 1秒)
-  # Enchanted Mobs 機能の有効化フラグ
-  enchanted-mobs:
-    enabled: true
-
-  # Entity Health System 全体を有効/無効にする
   entity-health:
     enabled: true
 

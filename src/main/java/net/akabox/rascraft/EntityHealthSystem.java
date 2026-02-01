@@ -115,7 +115,7 @@ public class EntityHealthSystem implements Listener {
         if (!(event.getEntity() instanceof LivingEntity target)) return;
 
         // config.yml から範囲を取得 (デフォルト値は 16.0)
-        double configRange = plugin.getConfig().getDouble("features.damage-indicator.share-continuous-damage.range", 16.0);
+        double configRange = plugin.getConfig().getDouble("damage-indicator.share-continuous-damage.range", 16.0);
         double rangeSquared = configRange * configRange;
 
         // 最大体力を取得して実際の回復量を計算
@@ -315,8 +315,8 @@ public class EntityHealthSystem implements Listener {
         if (!(event.getEntity() instanceof LivingEntity target)) return;
 
         // --- 設定から範囲を取得 ---
-        // config.yml の features.damage-indicator.share-continuous-damage.range を参照
-        double configRange = plugin.getConfig().getDouble("features.damage-indicator.share-continuous-damage.range", 16.0);
+        // config.yml の damage-indicator.share-continuous-damage.range を参照
+        double configRange = plugin.getConfig().getDouble("damage-indicator.share-continuous-damage.range", 16.0);
         double rangeSquared = configRange * configRange;
 
         EntityDamageEvent.DamageCause cause = event.getCause();

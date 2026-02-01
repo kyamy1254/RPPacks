@@ -182,9 +182,9 @@ public class RascraftPluginPacks extends JavaPlugin {
         // TeleportEffect 設定
         tpEffectEnabled = config.getBoolean("teleport-effect.enabled", true);
 
-        this.healthViewDistance = config.getDouble("features.health-bar.view-distance", 8.0);
+        this.healthViewDistance = config.getDouble("health-bar.view-distance", 96.0);
         // 機能フラグの読み込み
-        this.enchantedMobsEnabled = config.getBoolean("features.enchanted-mobs.enabled", true);
+        this.enchantedMobsEnabled = config.getBoolean("enchanted-mobs.enabled", true);
         this.entityHealthEnabled = config.getBoolean("features.entity-health.enabled", true);
     }
 
@@ -284,11 +284,11 @@ public class RascraftPluginPacks extends JavaPlugin {
     }
 
     public boolean isIndicatorEnabled() {
-        return getConfig().getBoolean("features.damage-indicator.enabled", true);
+        return getConfig().getBoolean("damage-indicator.enabled", true);
     }
 
     public int getHealthDisplayTicks() {
-        return getConfig().getInt("features.health-bar.display-ticks", 60);
+        return getConfig().getInt("health-bar.display-ticks", 15);
     }
 
     public GrowType getGrowType(Material m) {
@@ -373,7 +373,34 @@ public class RascraftPluginPacks extends JavaPlugin {
 
     public void reloadPlugin() {
         this.isOverridden = false;
+        // Ensure default config and resource files exist
+        saveDefaultConfig();
+        createPlayerDataFile();
+        createLangFile();
+
+        // Reload configuration from disk (resets enchantedMobsEnabled/entityHealthEnabled to config values)
         loadConfiguration();
+
+        // Force reapply features according to NEW config values (not temp command state)
+        // This ensures config.yml changes + /rpp reload persists the settings
+        if (this.mobSystem != null) {
+            this.mobSystem.disable();
+            if (this.enchantedMobsEnabled) {
+                getServer().getPluginManager().registerEvents(this.mobSystem, this);
+                this.mobSystem.enable();
+            }
+        }
+
+        if (this.entityHealthSystem != null) {
+            this.entityHealthSystem.disable();
+            if (this.entityHealthEnabled) {
+                getServer().getPluginManager().registerEvents(this.entityHealthSystem, this);
+                this.entityHealthSystem.enable();
+            }
+        }
+
+        // Reload player data as it may have been recreated
+        loadPlayerData();
     }
 
     public double getHealthViewDistance() {
