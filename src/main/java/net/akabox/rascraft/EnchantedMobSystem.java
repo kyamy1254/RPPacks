@@ -11,20 +11,16 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.*;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.trim.TrimMaterial;
 import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
-import org.bukkit.inventory.meta.ArmorMeta;
-import org.bukkit.inventory.meta.trim.ArmorTrim;
-import org.bukkit.inventory.meta.trim.TrimMaterial;
-import org.bukkit.inventory.meta.trim.TrimPattern;
 
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.List;
 
 
 public class EnchantedMobSystem implements Listener {
@@ -36,6 +32,9 @@ public class EnchantedMobSystem implements Listener {
     private final java.util.Map<Location, java.util.concurrent.atomic.AtomicInteger> activeDamageStage = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Map<Location, java.util.UUID> occupiedBlocks = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Map<java.util.UUID, java.util.List<Integer>> mobTasks = new java.util.concurrent.ConcurrentHashMap<>();
+    // タスクIDではなく、設置されたブロックの「種類」と「現在のダメージ量」を管理する
+    private final java.util.Map<Location, Material> temporaryBlockTypes = new java.util.HashMap<>();
+    private final java.util.Map<Location, Integer> activeDamageStages = new java.util.HashMap<>();
 
     // === Configuration values (config.yml から読み込み) ===
     // スポーン時Enchanted化確率
@@ -139,7 +138,7 @@ public class EnchantedMobSystem implements Listener {
 
         // Config値を読み込む
         loadConfiguration();
-
+        startGlobalBlockDamageTask();
         startCampfireHealingTask();
     }
 
@@ -480,12 +479,112 @@ public class EnchantedMobSystem implements Listener {
         EntityEquipment equip = monster.getEquipment();
         if (equip == null) return;
 
-        // --- 1. 防具の生成 ---
+        // --- C. 【追加】ウィザースケルトン (ネザライト上半身 + 鉄装飾) ---
+        if (monster instanceof WitherSkeleton) {
+            ItemStack helmet = new ItemStack(Material.NETHERITE_HELMET);
+            ItemStack chest = new ItemStack(Material.NETHERITE_CHESTPLATE);
+
+            // 鉄の装飾を適用
+            applyArmorTrim(helmet, TrimMaterial.IRON);
+            applyArmorTrim(chest, TrimMaterial.IRON);
+
+            // 防具エンチャント
+            applyVanillaEnchants(helmet, "ARMOR");
+            applyVanillaEnchants(chest, "ARMOR");
+
+            equip.setHelmet(helmet);
+            equip.setChestplate(chest);
+            equip.setLeggings(null);
+            equip.setBoots(null);
+
+            // 初期武器は弓
+            ItemStack bow = new ItemStack(Material.BOW);
+            bow.addUnsafeEnchantment(Enchantment.FLAME, 1);
+            applyVanillaEnchants(bow, "BOW");
+            equip.setItemInMainHand(bow);
+
+            // ドロップ率設定
+            equip.setHelmetDropChance(0f);
+            equip.setChestplateDropChance(0f);
+            equip.setItemInMainHandDropChance(0f);
+            return;
+        }
+
+        // =========================================================
+        //  A. ピグリン系 (ブルート / 通常 / ゾンビ)
+        // =========================================================
+        // ※ PigZombie(ZombifiedPiglin)等のクラス名解決のため getType も併用
+        if (monster instanceof Piglin || monster instanceof PiglinBrute ||
+                monster instanceof PigZombie || monster.getType().name().contains("PIGLIN")) {
+
+            ItemStack helmet;
+            ItemStack chest = null;
+
+            if (monster instanceof PiglinBrute) {
+                // --- 1. ブルート：ネザライトヘルメットのみ ---
+                helmet = new ItemStack(Material.NETHERITE_HELMET);
+
+                // 武器の抽選：金の斧(90%) / ネザライトの斧(10%)
+                double weaponRoll = ThreadLocalRandom.current().nextDouble();
+                ItemStack axe;
+                if (weaponRoll < 0.90) {
+                    axe = new ItemStack(Material.GOLDEN_AXE);
+                } else {
+                    axe = new ItemStack(Material.NETHERITE_AXE);
+                }
+
+                applyVanillaEnchants(axe, "AXE");
+                equip.setItemInMainHand(axe);
+            } else {
+                // --- 2. 通常・ゾンビピグリン：金の上半身のみ ---
+                helmet = new ItemStack(Material.GOLDEN_HELMET);
+                chest = new ItemStack(Material.GOLDEN_CHESTPLATE);
+
+                // 武器：確率抽選
+                double roll = ThreadLocalRandom.current().nextDouble();
+                ItemStack weapon;
+                String category = "SWORD";
+
+                if (roll < 0.60) weapon = new ItemStack(Material.GOLDEN_SWORD);
+                else if (roll < 0.80) weapon = new ItemStack(Material.IRON_SWORD);
+                else if (roll < 0.95) { weapon = new ItemStack(Material.GOLDEN_AXE); category = "AXE"; }
+                else weapon = new ItemStack(Material.NETHERITE_SWORD);
+
+                applyVanillaEnchants(weapon, category);
+                equip.setItemInMainHand(weapon);
+            }
+
+            // 装飾とエンチャントの適用 (共通: 金装飾)
+            applyArmorTrim(helmet, TrimMaterial.GOLD);
+            applyVanillaEnchants(helmet, "ARMOR");
+            equip.setHelmet(helmet);
+
+            if (chest != null) {
+                applyArmorTrim(chest, TrimMaterial.GOLD);
+                applyVanillaEnchants(chest, "ARMOR");
+                equip.setChestplate(chest);
+            } else {
+                equip.setChestplate(null); // ブルート用
+            }
+
+            // 足装備は一律なし
+            equip.setLeggings(null);
+            equip.setBoots(null);
+
+            // ドロップ率設定 (0%)
+            equip.setHelmetDropChance(0f);
+            equip.setChestplateDropChance(0f);
+            equip.setItemInMainHandDropChance(0f);
+
+            return; // ピグリン系の処理終了
+        }
+
+        // =========================================================
+        //  B. 通常のゾンビ & スケルトン (既存のロジック)
+        // =========================================================
         ItemStack helmet = new ItemStack(Material.IRON_HELMET);
         ItemStack chest = new ItemStack(Material.IRON_CHESTPLATE);
 
-        // --- 2. 鍛冶型（装飾）の適用 ---
-        // ゾンビならダイヤモンド、スケルトンならアメジストで装飾
         if (monster instanceof Zombie) {
             applyArmorTrim(helmet, TrimMaterial.DIAMOND);
             applyArmorTrim(chest, TrimMaterial.DIAMOND);
@@ -494,11 +593,9 @@ public class EnchantedMobSystem implements Listener {
             applyArmorTrim(chest, TrimMaterial.AMETHYST);
         }
 
-        // 全ての装備に呪いを付与（ドロップ防止）
+        // 呪いとエンチャント
         helmet.addUnsafeEnchantment(Enchantment.VANISHING_CURSE, 1);
         chest.addUnsafeEnchantment(Enchantment.VANISHING_CURSE, 1);
-
-        // ランダムエンチャント
         applyVanillaEnchants(helmet, "ARMOR");
         applyVanillaEnchants(chest, "ARMOR");
 
@@ -507,7 +604,6 @@ public class EnchantedMobSystem implements Listener {
         equip.setHelmetDropChance(0f);
         equip.setChestplateDropChance(0f);
 
-        // --- 3. 武器の選定 (以前と同じ) ---
         ItemStack weapon = null;
         String category = "";
 
@@ -529,6 +625,7 @@ public class EnchantedMobSystem implements Listener {
             equip.setItemInMainHand(weapon);
             equip.setItemInMainHandDropChance(0.05f);
         }
+
     }
 
     /**
@@ -677,6 +774,12 @@ public class EnchantedMobSystem implements Listener {
         } else if (monster instanceof Spider spider) {
             
             // ※クモのWebTrap/飛びかかりはEvent/個体判定で処理
+        }else if (monster instanceof PiglinBrute brute) {
+            startClimbingAI(brute);
+            startLootingAI(brute);
+            // 指揮官ゾンビと同様の「群れ呼び出し」をブルートにも適用
+            // 注意：このメソッドを呼び出すためのトリガー（索敵時など）が必要です
+            startBruteCommanderAI(brute);
         }
 
         // 共通オーラエフェクトの開始
@@ -689,6 +792,7 @@ public class EnchantedMobSystem implements Listener {
             private Location lastLoc = monster.getLocation();
             private int stuckTicks = 0;
             private int searchTimer = 0;
+            LivingEntity target = monster.getTarget();
 
             @Override
             public void run() {
@@ -696,8 +800,16 @@ public class EnchantedMobSystem implements Listener {
                     cancel();
                     return;
                 }
-
                 LivingEntity target = monster.getTarget();
+
+                if (target == null) {
+                    return;
+                }
+
+                if (!monster.getWorld().equals(target.getWorld())) {
+                    return; // 異なるワールドにいる場合は何もしない
+                }
+
                 Location mLoc = monster.getLocation();
 
                 // 1. 【感知強化】ターゲットの徹底捜索と記憶
@@ -741,6 +853,31 @@ public class EnchantedMobSystem implements Listener {
                     speed = farDistanceSpeed; // 遠距離：一気に距離を詰める（ダッシュ）
                 } else if (distance < closeDistanceThreshold) {
                     speed = closeDistanceSpeed; // 近距離：逃がさない速度
+                }
+
+                if (monster instanceof WitherSkeleton wither) {
+                    EntityEquipment equipment = wither.getEquipment();
+                    if (equipment != null) {
+                        double dist = mLoc.distance(target.getLocation());
+                        Material currentItem = equipment.getItemInMainHand().getType();
+
+                        if (dist > 7.0) { // 7マスより遠いなら弓
+                            if (currentItem != Material.BOW) {
+                                ItemStack bow = new ItemStack(Material.BOW);
+                                bow.addUnsafeEnchantment(Enchantment.FLAME, 1);
+                                applyVanillaEnchants(bow, "BOW");
+                                equipment.setItemInMainHand(bow);
+                            }
+                        } else { // 7マス以内なら石の剣
+                            if (currentItem != Material.STONE_SWORD) {
+                                ItemStack sword = new ItemStack(Material.STONE_SWORD);
+                                applyVanillaEnchants(sword, "SWORD");
+                                equipment.setItemInMainHand(sword);
+                                // 持ち替え時に音を鳴らすと格好良い
+                                wither.getWorld().playSound(wither.getLocation(), Sound.ENTITY_ITEM_PICKUP, 1.0f, 0.5f);
+                            }
+                        }
+                    }
                 }
 
                 // 壁越しでもターゲットを認識し続ける（パスの再計算頻度を上げる）
@@ -807,7 +944,8 @@ public class EnchantedMobSystem implements Listener {
     // --- 2. スケルトンのAI強化 (偏差撃ち & バックステップ) ---
     @EventHandler
     public void onSkeletonShoot(EntityShootBowEvent event) {
-        if (!(event.getEntity() instanceof Skeleton skeleton) || !isEnchanted(skeleton)) return;
+        // 判定に WitherSkeleton を追加
+        if (!(event.getEntity() instanceof AbstractSkeleton skeleton) || !isEnchanted(skeleton)) return;
         if (!(skeleton.getTarget() instanceof Player player)) return;
 
         // 1. 基本情報の取得
@@ -816,28 +954,32 @@ public class EnchantedMobSystem implements Listener {
 
         // バニラの初速を取得し、強化倍率を適用
         double baseSpeed = event.getProjectile().getVelocity().length();
-        double straightSpeed = baseSpeed * arrowSpeedMultiplier;
+
+        // ウィザースケルトンの場合は弾速をさらに1.3倍速くする
+        double currentMultiplier = arrowSpeedMultiplier;
+        if (skeleton instanceof WitherSkeleton) {
+            currentMultiplier *= 1.3;
+        }
+        double straightSpeed = baseSpeed * currentMultiplier;
 
         // --- 2. 弾種の分岐 (ホーミング矢) ---
         if (ThreadLocalRandom.current().nextDouble() < homingArrowChance) {
             launchHomingArrow(skeleton, player);
-            event.setCancelled(true); // 通常の矢の発射をキャンセル
+            event.setCancelled(true);
             return;
         }
 
         // --- 3. 直線スナイプ（偏差なし・重力無視） ---
-        // 偏差計算をあえて排除し、現在のプレイヤーの胸元を正確に狙う
         Vector direction = pLoc.toVector().subtract(sLoc.toVector()).normalize();
 
         // 矢を生成して物理挙動を上書き
         Entity arrow = event.getProjectile();
         arrow.setVelocity(direction.multiply(straightSpeed));
 
-        // 【重要】重力の影響を無効化（API 1.13+）
-        // これにより、放物線を描かずレーザーのように真っ直ぐ飛びます
+        // 重力の影響を無効化（レーザーのような弾道）
         arrow.setGravity(false);
 
-        // 5秒後（飛距離的に十分な時間）に重力を戻すか消去する（負荷対策）
+        // 負荷対策：5秒後に消去
         new BukkitRunnable() {
             @Override
             public void run() {
@@ -845,13 +987,15 @@ public class EnchantedMobSystem implements Listener {
             }
         }.runTaskLater(plugin, 100);
 
-        skeleton.getWorld().playSound(sLoc, Sound.ENTITY_ARROW_SHOOT, 1.0f, 1.8f);
+        // ウィザースケルトンの場合は少し低いピッチで音を鳴らす
+        float pitch = (skeleton instanceof WitherSkeleton) ? 1.2f : 1.8f;
+        skeleton.getWorld().playSound(sLoc, Sound.ENTITY_ARROW_SHOOT, 1.0f, pitch);
     }
 
     /**
      * 低速ホーミング弾の発射ロジック
      */
-    private void launchHomingArrow(Skeleton skeleton, Player target) {
+    private void launchHomingArrow(AbstractSkeleton skeleton, Player target) {
         // 矢の生成
         Arrow homingArrow = skeleton.launchProjectile(Arrow.class);
         homingArrow.setPickupStatus(AbstractArrow.PickupStatus.DISALLOWED);
@@ -1101,8 +1245,38 @@ public class EnchantedMobSystem implements Listener {
             }
         }
 
-        // 演出：指揮官が咆哮するような音
-        
+    }
+    private void applyPiglinBruteSwarm(PiglinBrute leadBrute, Player target) {
+        // 1. 本人も確実にターゲットを追わせる
+        leadBrute.setTarget(target);
+
+        // 2. 周囲のピグリン・ブルート・ゾンビピグリンを呼ぶ
+        // 範囲はゾンビ版の変数を流用、または設定値に合わせて調整
+        for (Entity nearby : leadBrute.getNearbyEntities(swarmDetectionRange, commanderAuraHeight / 2, swarmDetectionRange)) {
+
+            // 判定対象：ピグリン、ピグリンブルート、ゾンビピグリン
+            if (nearby instanceof Piglin || nearby instanceof PiglinBrute || nearby instanceof PigZombie) {
+                Monster fellow = (Monster) nearby;
+
+                // 指揮官と同じターゲットを強制設定
+                fellow.setTarget(target);
+
+                /*
+                 * 猪突猛進バフ：
+                 * 移動速度上昇 II (Speed II) と、攻撃の重さを出すために 強さ I (Strength I) を付与
+                 */
+                fellow.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 200, 1, false, true, true));
+                fellow.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, 200, 0, false, true, true));
+
+                // ピグリンらしい視覚演出（溶岩のパチパチ音や火花）
+                if (random.nextDouble() < 0.4) {
+                    // LAVA（溶岩の火花）で興奮状態を表現
+                    fellow.getWorld().spawnParticle(Particle.LAVA, fellow.getLocation().add(0, 1.5, 0), 5, 0.3, 0.3, 0.3, 0.1);
+                    // 豚の鼻鳴らし音
+                    fellow.getWorld().playSound(fellow.getLocation(), Sound.ENTITY_PIGLIN_BRUTE_ANGRY, 1.0f, 1.2f);
+                }
+            }
+        }
     }
 
     // --- 7. クモのAI: 粘着糸 & 飛びかかり ---
@@ -1255,28 +1429,26 @@ public class EnchantedMobSystem implements Listener {
 
     @EventHandler
     public void onZombieLowHP(EntityDamageEvent event) {
-        if (!(event.getEntity() instanceof Zombie zombie) || !isEnchanted(zombie)) return;
+        // Zombie(ハスク等含む) または PigZombie(ゾンビピグリン) を対象にする
+        if (!(event.getEntity() instanceof Monster monster) || !isEnchanted(monster)) return;
+        if (!(monster instanceof Zombie || monster instanceof PigZombie)) return;
 
-        // 【修正】PDCを使って増援済みかをチェック（メモリリーク防止）
-        if (zombie.getPersistentDataContainer().has(reinforcedKey, PersistentDataType.BYTE)) return;
+        if (monster.getPersistentDataContainer().has(reinforcedKey, PersistentDataType.BYTE)) return;
 
-        // 体力判定 (config値以下)
-        if (zombie.getHealth() - event.getFinalDamage() <= reinforcementHpThreshold) {
-            // 確率で「救援要請」
+        // 体力判定
+        if (monster.getHealth() - event.getFinalDamage() <= reinforcementHpThreshold) {
             if (ThreadLocalRandom.current().nextDouble() < reinforcementSpawnChance) {
 
-                // 【修正】増援済みフラグをPDCに書き込み
-                zombie.getPersistentDataContainer().set(reinforcedKey, PersistentDataType.BYTE, (byte) 1);
+                monster.getPersistentDataContainer().set(reinforcedKey, PersistentDataType.BYTE, (byte) 1);
 
-                // --- 発動時の演出 ---
-                Location loc = zombie.getLocation();
-                zombie.getWorld().playSound(loc, Sound.ENTITY_ZOMBIE_VILLAGER_CONVERTED, 1.0f, 0.5f);
-                zombie.getWorld().spawnParticle(Particle.ANGRY_VILLAGER, loc.add(0, 1, 0), 15, 0.5, 0.5, 0.5, 0); // 修正: パーティクル名を最新APIに適合
+                Location loc = monster.getLocation();
+                monster.getWorld().playSound(loc, Sound.ENTITY_ZOMBIE_VILLAGER_CONVERTED, 1.0f, 0.5f);
+                monster.getWorld().spawnParticle(Particle.ANGRY_VILLAGER, loc.add(0, 1, 0), 15, 0.5, 0.5, 0.5, 0);
 
-                // 増援を召喚
                 int count = ThreadLocalRandom.current().nextInt(reinforcementCountMin, reinforcementCountMax + 1);
                 for (int i = 0; i < count; i++) {
-                    spawnReinforcement(zombie);
+                    // リーダー個体を渡す
+                    spawnReinforcement(monster);
                 }
             }
         }
@@ -1285,7 +1457,13 @@ public class EnchantedMobSystem implements Listener {
     /**
      * 増援ゾンビのスポーン処理
      */
-    private void spawnReinforcement(Zombie leader) {
+    /**
+     * 増援のスポーン処理（種類維持版）
+     */
+    /**
+     * 増援のスポーン処理（エラー修正版）
+     */
+    private void spawnReinforcement(Monster leader) {
         double x = (ThreadLocalRandom.current().nextDouble() - 0.5) * (reinforcementSpawnDistance * 2);
         double z = (ThreadLocalRandom.current().nextDouble() - 0.5) * (reinforcementSpawnDistance * 2);
         Location spawnLoc = leader.getLocation().add(x, 0, z);
@@ -1294,29 +1472,31 @@ public class EnchantedMobSystem implements Listener {
             spawnLoc.add(0, 1, 0);
         }
 
-        leader.getWorld().spawn(spawnLoc, Zombie.class, fellow -> {
-            // --- 【解決策】まず「判定済み」として 0 (False) を書き込む ---
-            // これにより onSpawn メソッド内の二重判定を完全にブロックします
-            fellow.getPersistentDataContainer().set(enchantedKey, PersistentDataType.BYTE, (byte) 0);
+        // 【重要修正】leader.getClass() ではなく EntityClass を取得する
+        // これにより CraftPigZombie ではなく PigZombie.class が正しく渡されます
+        Class<? extends Entity> entityClass = leader.getType().getEntityClass();
+        if (entityClass == null) return; // 万が一取得できない場合の安全策
 
-            // 増援の連鎖（増援がさらに増援を呼ぶ）を防ぐためのフラグ
+        leader.getWorld().spawn(spawnLoc, (Class<? extends Monster>) entityClass, fellow -> {
+            fellow.getPersistentDataContainer().set(enchantedKey, PersistentDataType.BYTE, (byte) 0);
             fellow.getPersistentDataContainer().set(reinforcedKey, PersistentDataType.BYTE, (byte) 1);
 
-            // 増援としての判定確率
             if (ThreadLocalRandom.current().nextDouble() < enchantedReinforcementChance) {
-                // ここで呼び出す makeEnchanted が PDC を 1 に更新します
                 makeEnchanted(fellow);
-
                 fellow.getWorld().strikeLightningEffect(fellow.getLocation());
                 fellow.setCustomName("§d§lEnchanted Reinforcement");
             } else {
-                // 確率に漏れた個体：通常の増援設定
-                fellow.setCustomName("§7Zombie Grunt");
+                // 種類名をカスタム名に反映
+                String typeName = leader.getType().name().replace("_", " ").toLowerCase();
+                fellow.setCustomName("§7" + capitalize(typeName) + " Grunt");
+
                 EntityEquipment equip = fellow.getEquipment();
                 if (equip != null) {
-                    // 装備は鉄ではなくレザーなどで差別化
-                    equip.setHelmet(new ItemStack(Material.LEATHER_HELMET));
-                    equip.setChestplate(new ItemStack(Material.LEATHER_CHESTPLATE));
+                    // ゾンビピグリン以外なら装備を配布
+                    if (fellow instanceof Zombie && !(fellow instanceof PigZombie)) {
+                        equip.setHelmet(new ItemStack(Material.LEATHER_HELMET));
+                        equip.setChestplate(new ItemStack(Material.LEATHER_CHESTPLATE));
+                    }
                     equip.setHelmetDropChance(0f);
                     equip.setChestplateDropChance(0f);
                 }
@@ -1326,9 +1506,14 @@ public class EnchantedMobSystem implements Listener {
                 fellow.setTarget(leader.getTarget());
             }
 
-            // 1.21対応：演出エフェクト（INSTANT_EFFECTは色指定必須）
             fellow.getWorld().spawnParticle(Particle.CLOUD, fellow.getLocation(), 5, 0.2, 0.2, 0.2, 0.05);
         });
+    }
+
+    // ヘルパーメソッド：名前を綺麗にする用（例：PIG_ZOMBIE -> Pig zombie）
+    private String capitalize(String str) {
+        if (str == null || str.isEmpty()) return str;
+        return str.substring(0, 1).toUpperCase() + str.substring(1);
     }
 
     private boolean isUndead(Entity entity) {
@@ -1421,7 +1606,7 @@ public class EnchantedMobSystem implements Listener {
                 if (diffY > verticalBuildCloseDistance && (probe1.getBlock().getType().isSolid() || probe2.getBlock().getType().isSolid())) {
                     org.bukkit.block.Block stepBase = mLoc.getBlock();
                     if (stepBase.getType() == Material.AIR) {
-                        refreshTemporaryBlock(stepBase.getLocation());
+                        refreshTemporaryBlock(monster, stepBase.getLocation());
                         monster.setVelocity(new Vector(0, 0.42, 0));
                         return;
                     }
@@ -1436,7 +1621,7 @@ public class EnchantedMobSystem implements Listener {
                         Location center = feet.getLocation().add(0.5, 0.1, 0.5);
                         center.setDirection(mLoc.getDirection());
                         monster.teleport(center);
-                        refreshTemporaryBlock(feet.getLocation());
+                        refreshTemporaryBlock(monster, feet.getLocation());
                         monster.setVelocity(new Vector(0, 0.42, 0));
                         stuckTicks = 0;
                         return;
@@ -1452,7 +1637,7 @@ public class EnchantedMobSystem implements Listener {
                     if (bridgeBlock.getType() == Material.AIR && deepBlock.getType() == Material.AIR) {
                         if (!probe1.getBlock().getRelative(0, 1, 0).getType().isSolid() &&
                                 !probe1.getBlock().getRelative(0, 2, 0).getType().isSolid()) {
-                            refreshTemporaryBlock(bridgeBlock.getLocation());
+                            refreshTemporaryBlock(monster, bridgeBlock.getLocation());
                             monster.setVelocity(monster.getVelocity().add(dir.multiply(0.1)));
                         }
                     }
@@ -1462,63 +1647,73 @@ public class EnchantedMobSystem implements Listener {
         registerMobTask(monster, t.getTaskId());
     }
 
-    private void refreshTemporaryBlock(Location blockLoc) {
+    private void refreshTemporaryBlock(Monster monster, Location blockLoc) {
         org.bukkit.block.Block block = blockLoc.getBlock();
-        // ブロックが未設置なら設置してダメージステージを初期化
+
+        // ネザー系（ピグリン、ウィザスケ、ゾンビピグリン）ならブラックストーン
+        Material blockType = Material.MOSSY_COBBLESTONE;
+        if (monster instanceof PiglinAbstract || monster instanceof WitherSkeleton || monster instanceof PigZombie) {
+            blockType = Material.GILDED_BLACKSTONE;
+        }
+
+        // ブロックが空気なら設置
         if (block.getType() == Material.AIR) {
-            block.setType(Material.MOSSY_COBBLESTONE);
-            block.getWorld().playSound(block.getLocation(), Sound.BLOCK_STONE_PLACE, 0.5f, 0.8f);
+            block.setType(blockType);
+            temporaryBlockTypes.put(blockLoc, blockType);
+            block.getWorld().playSound(blockLoc, Sound.BLOCK_STONE_PLACE, 0.5f, 0.8f);
         }
 
-        // 既にアニメーション中ならダメージステージを加算して累積させる
-        if (activeBlocks.containsKey(blockLoc)) {
-            activeDamageStage.computeIfAbsent(blockLoc, k -> new java.util.concurrent.atomic.AtomicInteger(0)).addAndGet(1);
-            return;
-        }
+        // ダメージを加算（0から開始し、最大10まで）
+        activeDamageStages.merge(blockLoc, 1, (old, val) -> Math.min(10, old + 1));
 
-        // 新規アニメーションを開始（shared な AtomicInteger を使用）
-        java.util.concurrent.atomic.AtomicInteger stage = new java.util.concurrent.atomic.AtomicInteger(0);
-        activeDamageStage.put(blockLoc, stage);
-
-        int taskId = new BukkitRunnable() {
+        // まだ全体タイマーが動いていない場合は、別途管理タスクを1つだけ回す（コンストラクタ等で1回起動するのが理想）
+    }
+    public void startGlobalBlockDamageTask() {
+        new BukkitRunnable() {
             @Override
             public void run() {
-                if (block.getType() != Material.MOSSY_COBBLESTONE) {
-                    clearDamage(block);
-                    activeBlocks.remove(blockLoc);
-                    activeDamageStage.remove(blockLoc);
-                    cancel();
-                    return;
-                }
+                Iterator<Map.Entry<Location, Integer>> it = activeDamageStages.entrySet().iterator();
+                while (it.hasNext()) {
+                    Map.Entry<Location, Integer> entry = it.next();
+                    Location loc = entry.getKey();
+                    int stage = entry.getValue();
+                    org.bukkit.block.Block block = loc.getBlock();
+                    Material originalType = temporaryBlockTypes.getOrDefault(loc, Material.MOSSY_COBBLESTONE);
 
-                int damageStage = stage.getAndIncrement(); // スレッドセーフに取得して増加
+                    // ブロックがプレイヤーによって壊されていた場合などは中断
+                    if (block.getType() != originalType) {
+                        clearDamageAt(loc);
+                        it.remove();
+                        temporaryBlockTypes.remove(loc);
+                        continue;
+                    }
 
-                // progress は 0.0f ～ 1.0f（11段階）
-                float progress = Math.min(1.0f, damageStage / 10.0f);
-                block.getWorld().getPlayers().forEach(p -> p.sendBlockDamage(block.getLocation(), progress));
+                    // 全プレイヤーに現在のダメージ段階を送信 (0.0f ~ 1.0f)
+                    float progress = stage / 10.0f;
+                    loc.getWorld().getPlayers().forEach(p -> p.sendBlockDamage(loc, progress));
 
-                // 完全に破壊する段階に到達したら消去処理
-                if (damageStage >= 10) {
-                    block.setType(Material.AIR);
-                    block.getWorld().spawnParticle(Particle.BLOCK, block.getLocation().add(0.5, 0.5, 0.5), 15, 0.2, 0.2, 0.2, Material.MOSSY_COBBLESTONE.createBlockData());
-                    block.getWorld().playSound(block.getLocation(), Sound.BLOCK_STONE_BREAK, 1.0f, 1.2f);
+                    // 次の更新に向けてステージを進める（または refresh で加算されたものを使う）
+                    // ここでは「時間経過で自然に壊れる」ように毎秒少しずつ進める処理
+                    if (stage >= 10) {
+                        // 破壊処理
+                        block.setType(Material.AIR);
+                        block.getWorld().spawnParticle(Particle.BLOCK, loc.clone().add(0.5, 0.5, 0.5), 15, 0.2, 0.2, 0.2, originalType.createBlockData());
+                        block.getWorld().playSound(loc, Sound.BLOCK_STONE_BREAK, 1.0f, 1.2f);
 
-                    clearDamage(block);
-                    activeBlocks.remove(blockLoc);
-                    activeDamageStage.remove(blockLoc);
-                    cancel();
+                        clearDamageAt(loc);
+                        it.remove();
+                        temporaryBlockTypes.remove(loc);
+                    } else {
+                        // 自動で壊れる速度（refreshされない場合でも少しずつ進む）
+                        entry.setValue(stage + 1);
+                    }
                 }
             }
-        }.runTaskTimer(plugin, 0, damageAnimationInterval).getTaskId();
-
-        activeBlocks.put(blockLoc, taskId);
+        }.runTaskTimer(plugin, 0, 20L); // 1秒ごとに一括更新
     }
 
-    // ひびをリセットするためのヘルパーメソッド
-    private void clearDamage(org.bukkit.block.Block block) {
-        block.getWorld().getPlayers().forEach(p -> p.sendBlockDamage(block.getLocation(), 0.0f));
-        // ダメージステージが残っていればクリーンアップ
-        activeDamageStage.remove(block.getLocation());
+    private void clearDamageAt(Location loc) {
+        loc.getWorld().getPlayers().forEach(p -> p.sendBlockDamage(loc, 0.0f));
     }
 
     @EventHandler
@@ -1804,6 +1999,28 @@ public class EnchantedMobSystem implements Listener {
                 }
             }
         }
+    }
+    private void startBruteCommanderAI(PiglinBrute brute) {
+        org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (!brute.isValid() || brute.isDead()) {
+                    cancel();
+                    return;
+                }
+
+                LivingEntity target = brute.getTarget();
+                // ターゲットがプレイヤーかつサバイバル/アドベンチャーモードの場合のみ発動
+                if (target instanceof Player player &&
+                        (player.getGameMode() == GameMode.SURVIVAL || player.getGameMode() == GameMode.ADVENTURE)) {
+
+                    // 群れ召喚スキルの実行
+                    applyPiglinBruteSwarm(brute, player);
+                }
+            }
+        }.runTaskTimer(plugin, 0, 40); // 2秒(40ticks)ごとに索敵・号令
+
+        registerMobTask(brute, t.getTaskId());
     }
 
 }
