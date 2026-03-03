@@ -9,6 +9,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Monster;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
@@ -23,7 +24,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-
 public class RasPluginCommand implements CommandExecutor, TabCompleter {
     private final RascraftPluginPacks plugin;
 
@@ -32,12 +32,12 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
     }
 
     @Override
-    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label,
+            String[] args) {
         if (args.length == 0 || args[0].equalsIgnoreCase("version")) {
             sendVersionInfo(sender);
             return true;
         }
-
 
         String sub = args[0].toLowerCase();
 
@@ -47,27 +47,32 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
                 return true;
             }
             case "status" -> {
-                if (checkAdmin(sender)) sendStatus(sender);
+                if (checkAdmin(sender))
+                    sendStatus(sender);
                 return true;
             }
             case "enchantedmobs" -> {
-                if (checkAdmin(sender)) handleEnchantedMobs(sender, label, args);
+                if (checkAdmin(sender))
+                    handleEnchantedMobs(sender, label, args);
                 return true;
             }
             case "entityhealth" -> {
-                if (checkAdmin(sender)) handleEntityHealth(sender, label, args);
+                if (checkAdmin(sender))
+                    handleEntityHealth(sender, label, args);
                 return true;
             }
             case "reload" -> {
                 if (checkAdmin(sender)) {
                     plugin.reloadPlugin();
-                    if (plugin.getMobSystem() != null) plugin.getMobSystem().reloadConfiguration();
+                    if (plugin.getMobSystem() != null)
+                        plugin.getMobSystem().reloadConfiguration();
                     sender.sendMessage(plugin.getMessage("reload-success"));
                 }
                 return true;
             }
             case "sneakgrow" -> {
-                if (checkAdmin(sender)) handleSneakGrow(sender, label, args);
+                if (checkAdmin(sender))
+                    handleSneakGrow(sender, label, args);
                 return true;
             }
             case "trail" -> {
@@ -75,11 +80,13 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
                 return true;
             }
             case "tpeffect" -> {
-                if (checkAdmin(sender)) handleTpEffect(sender, label, args);
+                if (checkAdmin(sender))
+                    handleTpEffect(sender, label, args);
                 return true;
             }
             case "spawn" -> {
-                if (checkAdmin(sender)) handleSpawnEnchanted(sender, args);
+                if (checkAdmin(sender))
+                    handleSpawnEnchanted(sender, args);
                 return true;
             }
             default -> {
@@ -113,11 +120,13 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
                 if (type.equals("chance")) {
                     double val = Double.parseDouble(args[3]);
                     plugin.setSuccessChance(val, true);
-                    sender.sendMessage(plugin.getMessage("sneakgrow-set").replace("{type}", "成功確率").replace("{value}", (val * 100) + "%"));
+                    sender.sendMessage(plugin.getMessage("sneakgrow-set").replace("{type}", "成功確率").replace("{value}",
+                            (val * 100) + "%"));
                 } else if (type.equals("radius")) {
                     int val = Integer.parseInt(args[3]);
                     plugin.setGrowRadius(val);
-                    sender.sendMessage(plugin.getMessage("sneakgrow-set").replace("{type}", "成長半径").replace("{value}", String.valueOf(val)));
+                    sender.sendMessage(plugin.getMessage("sneakgrow-set").replace("{type}", "成長半径").replace("{value}",
+                            String.valueOf(val)));
                 }
             } catch (NumberFormatException e) {
                 sender.sendMessage(plugin.getMessage("invalid-number"));
@@ -128,12 +137,15 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
     // --- Trail コマンド処理 ---
     private void handleTrailCommand(CommandSender sender, String label, String[] args) {
         if (args.length == 1) {
-            if (sender instanceof Player p) openTrailMenu(p, 0);
-            else sender.sendMessage(plugin.getMessage("player-only"));
+            if (sender instanceof Player p)
+                openTrailMenu(p, 0);
+            else
+                sender.sendMessage(plugin.getMessage("player-only"));
             return;
         }
 
-        if (!checkAdmin(sender)) return;
+        if (!checkAdmin(sender))
+            return;
 
         String action = args[1].toLowerCase();
         if (action.equals("enable") || action.equals("disable")) {
@@ -156,7 +168,8 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
 
             List<String> info = new ArrayList<>();
             info.add(ChatColor.GRAY + "対象プレイヤー: " + ChatColor.WHITE + target.getName());
-            info.add(ChatColor.GRAY + "装着中のエフェクト: " + (currentEffect == null ? ChatColor.RED + "なし" : ChatColor.GREEN + currentEffect));
+            info.add(ChatColor.GRAY + "装着中のエフェクト: "
+                    + (currentEffect == null ? ChatColor.RED + "なし" : ChatColor.GREEN + currentEffect));
             if (target.hasPermission("rascraft.trail.vip")) {
                 info.add(ChatColor.GOLD + "★ VIP権限を保有しています");
             }
@@ -223,40 +236,86 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
 
         // 2. 引数の数をチェック
         if (args.length < 2) {
-            player.sendMessage(ChatColor.RED + "使用法: /" + plugin.getName().toLowerCase() + " spawn <zombie|skeleton|creeper|spider>");
+            player.sendMessage(ChatColor.RED + "使用法: /" + plugin.getName().toLowerCase() + " spawn <type> [--force]");
+            player.sendMessage(ChatColor.GRAY + "オプション: --force は許可リストを無視してエンチャント化します");
             return;
         }
 
-        // 3. エンティティタイプをパース
+        // force フラグをチェック
+        boolean force = false;
+        for (String arg : args) {
+            if (arg.equalsIgnoreCase("--force")) {
+                force = true;
+                break;
+            }
+        }
+
+        // 3. エンティティタイプをパース（いくつかの別名を許可）
         EntityType type;
         try {
-            type = EntityType.valueOf(args[1].toUpperCase());
+            String raw = args[1].toUpperCase();
+            // ユーザーの入力でよく使われる別名を標準の Enum 名に変換
+            if (raw.equals("MAGMA") || raw.equals("MAGMACUBE") || raw.equals("MAGMA-CUBE"))
+                raw = "MAGMA_CUBE";
+            type = EntityType.valueOf(raw);
         } catch (IllegalArgumentException e) {
             player.sendMessage(ChatColor.RED + "無効なエンティティタイプです。");
             return;
         }
 
         // 4. スポーンと強化の実行
+        final boolean finalForce = force;
         player.getWorld().spawn(player.getLocation(), type.getEntityClass(), entity -> {
-            if (entity instanceof Monster monster) {
-                // メインクラス(plugin)経由でMobSystemの強化メソッドを呼び出す
-                // 注意: plugin.getMobSystem() などのGetterがメインクラスにある前提です
-                // もしメソッド名が applyEnchanted ならそちらに書き換えてください
-                plugin.getMobSystem().makeEnchanted(monster);
+            if (entity instanceof LivingEntity living) {
+                // スライム/マグマキューブの個体数制限チェック
+                EnchantedMobSystem mobSystem = plugin.getMobSystem();
+                if (type == EntityType.SLIME) {
+                    if (mobSystem.getActiveEnchantedSlimeCount() >= mobSystem.slimeMaxPerServer && !finalForce) {
+                        player.sendMessage(ChatColor.RED + "エンチャントスライムの上限に達しています ("
+                                + mobSystem.getActiveEnchantedSlimeCount() + "/" + mobSystem.slimeMaxPerServer + ")");
+                        entity.remove();
+                        return;
+                    }
+                } else if (type == EntityType.MAGMA_CUBE) {
+                    if (mobSystem.getActiveEnchantedMagmaCubeCount() >= mobSystem.magmaCubeMaxPerServer
+                            && !finalForce) {
+                        player.sendMessage(ChatColor.RED + "エンチャントマグマキューブの上限に達しています ("
+                                + mobSystem.getActiveEnchantedMagmaCubeCount() + "/" + mobSystem.magmaCubeMaxPerServer
+                                + ")");
+                        entity.remove();
+                        return;
+                    }
+                }
 
-                player.sendMessage(ChatColor.LIGHT_PURPLE + "Enchanted " + type.name() + " を召喚しました！");
+                // LivingEntity（Monster 制限なし）を受け入れる
+                mobSystem.makeEnchanted(living, finalForce);
+
+                // スライム/マグマキューブのトラッキングセットに登録
+                if (type == EntityType.SLIME) {
+                    mobSystem.registerEnchantedSlime(living);
+                } else if (type == EntityType.MAGMA_CUBE) {
+                    mobSystem.registerEnchantedMagmaCube(living);
+                }
+
+                String msg = ChatColor.LIGHT_PURPLE + "Enchanted " + type.name() + " を召喚しました！";
+                if (finalForce) {
+                    msg += ChatColor.GOLD + " [FORCE]";
+                }
+                player.sendMessage(msg);
             } else {
-                player.sendMessage(ChatColor.RED + "Monster（敵対生物）以外はEnchanted化できません。");
+                player.sendMessage(ChatColor.RED + "LivingEntity（生き物）以外はエンチャント化できません。");
             }
         });
     }
 
     @Override
-    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, String[] args) {
+    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias,
+            String[] args) {
         if (args.length == 1) {
             List<String> subs = new ArrayList<>(Arrays.asList("trail", "help", "version"));
             if (sender.hasPermission("rppacks.admin")) {
-                subs.addAll(Arrays.asList("status", "reload", "sneakgrow", "tpeffect", "enchantedmobs", "entityhealth"));
+                subs.addAll(
+                        Arrays.asList("status", "reload", "sneakgrow", "tpeffect", "enchantedmobs", "entityhealth"));
             }
             return StringUtil.copyPartialMatches(args[0], subs, new ArrayList<>());
         }
@@ -266,12 +325,14 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
             // SneakGrow 補完
             if (sub.equals("sneakgrow")) {
                 if (args.length == 2)
-                    return StringUtil.copyPartialMatches(args[1], Arrays.asList("enable", "disable", "set"), new ArrayList<>());
+                    return StringUtil.copyPartialMatches(args[1], Arrays.asList("enable", "disable", "set"),
+                            new ArrayList<>());
                 if (args.length == 3 && args[1].equalsIgnoreCase("set"))
                     return StringUtil.copyPartialMatches(args[2], Arrays.asList("chance", "radius"), new ArrayList<>());
                 if (args.length == 4 && args[1].equalsIgnoreCase("set")) {
                     if (args[2].equalsIgnoreCase("chance"))
-                        return StringUtil.copyPartialMatches(args[3], Arrays.asList("0.1", "0.5", "1.0"), new ArrayList<>());
+                        return StringUtil.copyPartialMatches(args[3], Arrays.asList("0.1", "0.5", "1.0"),
+                                new ArrayList<>());
                     if (args[2].equalsIgnoreCase("radius"))
                         return StringUtil.copyPartialMatches(args[3], Arrays.asList("1", "2", "3"), new ArrayList<>());
                 }
@@ -279,10 +340,12 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
             // Trail 補完
             if (sub.equals("trail")) {
                 if (args.length == 2) {
-                    return StringUtil.copyPartialMatches(args[1], Arrays.asList("enable", "disable", "check"), new ArrayList<>());
+                    return StringUtil.copyPartialMatches(args[1], Arrays.asList("enable", "disable", "check"),
+                            new ArrayList<>());
                 }
                 if (args.length == 3) {
-                    if (args[1].equalsIgnoreCase("check")) return null; // Player names
+                    if (args[1].equalsIgnoreCase("check"))
+                        return null; // Player names
                     List<String> effects = new ArrayList<>(plugin.getAllowedTrails());
                     effects.addAll(plugin.getVipTrails());
                     effects.add("off");
@@ -292,15 +355,19 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
             // TpEffect 補完
             if (sub.equals("tpeffect")) {
                 if (args.length == 2)
-                    return StringUtil.copyPartialMatches(args[1], Arrays.asList("enable", "disable"), new ArrayList<>());
+                    return StringUtil.copyPartialMatches(args[1], Arrays.asList("enable", "disable"),
+                            new ArrayList<>());
             }
             if (sub.equals("enchantedmobs") || sub.equals("entityhealth")) {
-                if (args.length == 2) return StringUtil.copyPartialMatches(args[1], Arrays.asList("enable", "disable"), new ArrayList<>());
+                if (args.length == 2)
+                    return StringUtil.copyPartialMatches(args[1], Arrays.asList("enable", "disable"),
+                            new ArrayList<>());
             }
             if (sub.equals("spawn")) {
                 if (args.length == 2) {
                     // 召喚可能なMOBリストを提案
-                    return StringUtil.copyPartialMatches(args[1], Arrays.asList("zombie", "skeleton", "creeper", "spider"), new ArrayList<>());
+                    return StringUtil.copyPartialMatches(args[1],
+                            Arrays.asList("zombie", "skeleton", "creeper", "spider", "magma"), new ArrayList<>());
                 }
             }
         }
@@ -315,14 +382,16 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
         Inventory gui = Bukkit.createInventory(null, 54, title);
         ItemStack filler = createBtn(Material.GRAY_STAINED_GLASS_PANE, " ");
         ItemStack border = createBtn(Material.CYAN_STAINED_GLASS_PANE, " ");
-        for (int i = 0; i < 54; i++) gui.setItem(i, i >= 45 ? border : filler);
+        for (int i = 0; i < 54; i++)
+            gui.setItem(i, i >= 45 ? border : filler);
 
         String currentEffect = plugin.getPlayerEffect(player.getUniqueId());
         gui.setItem(4, createStatusIcon(player, currentEffect));
         List<String> list = new ArrayList<>(plugin.getAllowedTrails());
         list.addAll(plugin.getVipTrails());
 
-        int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34, 37, 38, 39, 40, 41, 42, 43};
+        int[] slots = { 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 33, 34, 37, 38, 39,
+                40, 41, 42, 43 };
         int start = page * slots.length;
 
         for (int i = 0; i < slots.length && (start + i) < list.size(); i++) {
@@ -330,7 +399,8 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
             gui.setItem(slots[i], createIcon(name, currentEffect, plugin.getVipTrails().contains(name)));
         }
 
-        if (page > 0) gui.setItem(48, createBtn(Material.ARROW, ChatColor.YELLOW + "← 前のページ"));
+        if (page > 0)
+            gui.setItem(48, createBtn(Material.ARROW, ChatColor.YELLOW + "← 前のページ"));
         gui.setItem(49, createBtn(Material.BARRIER, plugin.getRawMessage("remove-effect-button")));
         if (list.size() > (page + 1) * slots.length)
             gui.setItem(50, createBtn(Material.ARROW, ChatColor.YELLOW + "次のページ →"));
@@ -342,10 +412,12 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
         Material mat = Material.getMaterial(matName.toUpperCase());
         ItemStack item = new ItemStack(mat == null ? Material.FIREWORK_STAR : mat);
         ItemMeta m = item.getItemMeta();
-        if (m == null) return item;
+        if (m == null)
+            return item;
 
         boolean isEquipped = name.equalsIgnoreCase(current);
-        String pre = isVip ? plugin.getRawMessage("trail-item-vip-prefix") : plugin.getRawMessage("trail-item-common-prefix");
+        String pre = isVip ? plugin.getRawMessage("trail-item-vip-prefix")
+                : plugin.getRawMessage("trail-item-common-prefix");
         m.setDisplayName(pre + " " + ChatColor.AQUA + name);
 
         List<String> lore = new ArrayList<>();
@@ -371,8 +443,8 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
             m.setDisplayName(ChatColor.YELLOW + "あなたのステータス");
             m.setLore(Arrays.asList(
                     ChatColor.GRAY + " プレイヤー: " + ChatColor.WHITE + p.getName(),
-                    ChatColor.GRAY + " 現在のトレイル: " + (current == null ? ChatColor.RED + "なし" : ChatColor.GREEN + current)
-            ));
+                    ChatColor.GRAY + " 現在のトレイル: "
+                            + (current == null ? ChatColor.RED + "なし" : ChatColor.GREEN + current)));
             item.setItemMeta(m);
         }
         return item;
@@ -399,10 +471,11 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
 
     private void sendVersionInfo(CommandSender s) {
         sendStyledMsg(s, "システム情報", Arrays.asList(
-                ChatColor.YELLOW + "▶ " + ChatColor.GRAY + "バージョン : " + ChatColor.AQUA + plugin.getDescription().getVersion(),
-                ChatColor.YELLOW + "▶ " + ChatColor.GRAY + "作成者     : " + ChatColor.AQUA + String.join(", ", plugin.getDescription().getAuthors()),
-                ChatColor.YELLOW + "▶ " + ChatColor.GRAY + "状態       : " + ChatColor.GREEN + "● 稼働中"
-        ));
+                ChatColor.YELLOW + "▶ " + ChatColor.GRAY + "バージョン : " + ChatColor.AQUA
+                        + plugin.getDescription().getVersion(),
+                ChatColor.YELLOW + "▶ " + ChatColor.GRAY + "作成者     : " + ChatColor.AQUA
+                        + String.join(", ", plugin.getDescription().getAuthors()),
+                ChatColor.YELLOW + "▶ " + ChatColor.GRAY + "状態       : " + ChatColor.GREEN + "● 稼働中"));
     }
 
     private void sendStatus(CommandSender s) {
@@ -423,26 +496,26 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
                 ChatColor.GRAY + " » 現在の利用者: " + ChatColor.YELLOW + activeUsers + " 名",
                 "",
                 ChatColor.YELLOW + "[ TP Effect ]",
-                ChatColor.GRAY + " » 状態: " + (plugin.isTpEffectEnabled() ? "§a有効" : "§c無効")
-                ,"",
-                ChatColor.AQUA + "[ Enchanted Mobs ]",
+                ChatColor.GRAY + " » 状態: " + (plugin.isTpEffectEnabled() ? "§a有効" : "§c無効"), "",
+                ChatColor.GOLD + "[ Enchanted Mobs ]",
                 ChatColor.GRAY + " » 状態: " + (plugin.isEnchantedMobsEnabled() ? "§a有効" : "§c無効"),
                 "",
-                ChatColor.AQUA + "[ Entity Health System ]",
-                ChatColor.GRAY + " » 状態: " + (plugin.isEntityHealthEnabled() ? "§a有効" : "§c無効")
-        ));
+                ChatColor.RED + "[ Entity Health System ]",
+                ChatColor.GRAY + " » 状態: " + (plugin.isEntityHealthEnabled() ? "§a有効" : "§c無効")));
     }
 
     private void sendStyledMsg(CommandSender s, String title, List<String> lines) {
         s.sendMessage(ChatColor.DARK_GRAY + "§m----------------------------------------");
         s.sendMessage(ChatColor.GOLD + "  §lRPPacks §7- §f" + title);
         s.sendMessage("");
-        for (String line : lines) s.sendMessage("  " + line);
+        for (String line : lines)
+            s.sendMessage("  " + line);
         s.sendMessage(ChatColor.DARK_GRAY + "§m----------------------------------------");
     }
 
     private boolean checkAdmin(CommandSender s) {
-        if (s.hasPermission("rppacks.admin")) return true;
+        if (s.hasPermission("rppacks.admin"))
+            return true;
         s.sendMessage(plugin.getMessage("no-permission"));
         return false;
     }

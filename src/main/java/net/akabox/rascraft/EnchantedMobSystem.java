@@ -22,7 +22,6 @@ import org.bukkit.util.Vector;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
-
 public class EnchantedMobSystem implements Listener {
     private final RascraftPluginPacks plugin;
     private final NamespacedKey enchantedKey;
@@ -118,8 +117,42 @@ public class EnchantedMobSystem implements Listener {
     public double campfireScanHeight;
     public int campfireTaskInterval;
     private org.bukkit.scheduler.BukkitTask campfireTask = null;
+    // 設定で許可されたエンチャント対象の種類
+    public java.util.Set<EntityType> allowedEnchantedTypes = new java.util.HashSet<>();
+    // スライム・マグマキューブ
+    public double slimeGrowthInterval; // 成長するまでのティック間隔
+    public int slimeMaxSize; // 最大サイズ
+    public double slimeEarthquakeJumpPower; // ジャンプ力
+    public double slimeEarthquakeKnockbackForce; // プレイヤー吹き飛ばし距離
+    public int slimeEarthquakeCooldown; // クールダウン
+    // スライムバフオーラ
+    public double slimeBuffAuraRange;
+    public double slimeBuffAuraHeight;
+    public int slimeBuffAuraInterval;
 
-    private void registerMobTask(Monster m, int taskId) {
+    // マグマキューブ（スライムより弱体化）
+    public double magmaCubeGrowthInterval; // 成長するまでのティック間隔
+    public int magmaCubeMaxSize; // 最大サイズ
+    public double magmaCubeEarthquakeJumpPower; // ジャンプ力
+    public double magmaCubeEarthquakeKnockbackForce; // プレイヤー吹き飛ばし距離
+    public int magmaCubeEarthquakeCooldown; // クールダウン
+
+    // エンチャントスライム管理
+    public double slimeEnchantedSpawnChance;
+    public int slimeMaxPerServer;
+    private final java.util.Set<java.util.UUID> activeEnchantedSlimes = java.util.concurrent.ConcurrentHashMap
+            .newKeySet();
+
+    // エンチャントマグマキューブ管理
+    public double magmaCubeEnchantedSpawnChance;
+    public int magmaCubeMaxPerServer;
+    private final java.util.Set<java.util.UUID> activeEnchantedMagmaCubes = java.util.concurrent.ConcurrentHashMap
+            .newKeySet();
+
+    // デバッグモード
+    public boolean debugMode = false;
+
+    private <T extends Mob> void registerMobTask(T m, int taskId) {
         mobTasks.computeIfAbsent(m.getUniqueId(), k -> new java.util.ArrayList<>()).add(taskId);
     }
 
@@ -130,6 +163,13 @@ public class EnchantedMobSystem implements Listener {
         }
     }
 
+    // Mob版のキャンセルも対応
+    private void cancelMobTasksForMob(Mob m) {
+        java.util.List<Integer> ids = mobTasks.remove(m.getUniqueId());
+        if (ids != null) {
+            ids.forEach(id -> Bukkit.getScheduler().cancelTask(id));
+        }
+    }
 
     public EnchantedMobSystem(RascraftPluginPacks plugin) {
         this.plugin = plugin;
@@ -140,6 +180,21 @@ public class EnchantedMobSystem implements Listener {
         loadConfiguration();
         startGlobalBlockDamageTask();
         startCampfireHealingTask();
+
+        // アクティブなエンチャントスライム・マグマキューブの追跡とクリーンアップ（5秒間隔）
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                activeEnchantedSlimes.removeIf(uuid -> {
+                    org.bukkit.entity.Entity e = Bukkit.getEntity(uuid);
+                    return e == null || e.isDead() || !e.isValid();
+                });
+                activeEnchantedMagmaCubes.removeIf(uuid -> {
+                    org.bukkit.entity.Entity e = Bukkit.getEntity(uuid);
+                    return e == null || e.isDead() || !e.isValid();
+                });
+            }
+        }.runTaskTimer(plugin, 100L, 100L);
     }
 
     /**
@@ -147,6 +202,13 @@ public class EnchantedMobSystem implements Listener {
      */
     private void loadConfiguration() {
         var config = plugin.getConfig();
+
+        // グローバル設定: デバッグモード
+        debugMode = config.getBoolean("debug-mode", false);
+        if (debugMode) {
+            plugin.getLogger().info("=== DEBUG MODE ENABLED ===");
+        }
+
         var emConfig = config.getConfigurationSection("enchanted-mobs");
 
         if (emConfig == null) {
@@ -179,6 +241,39 @@ public class EnchantedMobSystem implements Listener {
             spiralAngleIncrement = 0.4;
             spiralRadius = 0.6;
         }
+
+        // ===== エンチャント化許可種族（ホストイル中心、ボスは除外） =====
+        List<String> allowed = emConfig.getStringList("allowed-types");
+        allowedEnchantedTypes.clear();
+        if (allowed == null || allowed.isEmpty()) {
+            // デフォルト（互換性維持）
+            debugLog("allowed-types が空です。デフォルト9種族を使用");
+            allowedEnchantedTypes.addAll(Arrays.asList(
+                    EntityType.ZOMBIE,
+                    EntityType.SKELETON,
+                    EntityType.CREEPER,
+                    EntityType.SPIDER,
+                    EntityType.SLIME,
+                    EntityType.MAGMA_CUBE,
+                    EntityType.PIGLIN,
+                    EntityType.PIGLIN_BRUTE,
+                    EntityType.WITHER_SKELETON));
+        } else {
+            debugLog("allowed-types から " + allowed.size() + " 種族をロード");
+            for (String s : allowed) {
+                if (s == null)
+                    continue;
+                String key = s.toUpperCase().replace('-', '_').replace(' ', '_');
+                try {
+                    EntityType et = EntityType.valueOf(key);
+                    allowedEnchantedTypes.add(et);
+                    debugLog("エンティティタイプ追加: " + et.getName());
+                } catch (IllegalArgumentException ex) {
+                    plugin.getLogger().warning("Invalid entity type in enchanted-mobs.allowed-types: " + s);
+                }
+            }
+        }
+        debugLog("allowed-types 最終サイズ: " + allowedEnchantedTypes.size());
 
         // ナビゲーション
         var navSection = emConfig.getConfigurationSection("navigation");
@@ -308,6 +403,58 @@ public class EnchantedMobSystem implements Listener {
             creeperPoisonCloudRadius = 4.0;
             creeperPoisonCloudDuration = 200;
             creeperPoisonCloudRadiusOnUse = -0.1;
+        }
+
+        // スライム設定
+        var slimeSection = emConfig.getConfigurationSection("slime");
+        if (slimeSection != null) {
+            slimeGrowthInterval = slimeSection.getDouble("growth-interval", 120);
+            slimeMaxSize = slimeSection.getInt("max-size", 4);
+            slimeEarthquakeJumpPower = slimeSection.getDouble("earthquake-jump-power", 0.8);
+            slimeEarthquakeKnockbackForce = slimeSection.getDouble("earthquake-knockback-force", 1.5);
+            slimeEarthquakeCooldown = slimeSection.getInt("earthquake-cooldown", 80);
+            slimeEnchantedSpawnChance = slimeSection.getDouble("enchanted-spawn-chance", 0.05);
+            slimeMaxPerServer = slimeSection.getInt("max-per-server", 5);
+            slimeBuffAuraRange = slimeSection.getDouble("buff-aura-range", 16);
+            slimeBuffAuraHeight = slimeSection.getDouble("buff-aura-height", 8);
+            slimeBuffAuraInterval = slimeSection.getInt("buff-aura-interval", 40);
+            debugLog("slime config ロード完了 - interval=" + slimeGrowthInterval + ", maxSize=" + slimeMaxSize
+                    + ", jumpPower=" + slimeEarthquakeJumpPower);
+        } else {
+            debugLog("slime section not found. Using defaults");
+            slimeGrowthInterval = 120;
+            slimeMaxSize = 4;
+            slimeEarthquakeJumpPower = 0.8;
+            slimeEarthquakeKnockbackForce = 1.5;
+            slimeEarthquakeCooldown = 80;
+            slimeEnchantedSpawnChance = 0.05;
+            slimeMaxPerServer = 5;
+            slimeBuffAuraRange = 16;
+            slimeBuffAuraHeight = 8;
+            slimeBuffAuraInterval = 40;
+        }
+
+        // マグマキューブ設定（スライムより弱体化）
+        var magmaSection = emConfig.getConfigurationSection("magma-cube");
+        if (magmaSection != null) {
+            magmaCubeGrowthInterval = magmaSection.getDouble("growth-interval", 200);
+            magmaCubeMaxSize = magmaSection.getInt("max-size", 3);
+            magmaCubeEarthquakeJumpPower = magmaSection.getDouble("earthquake-jump-power", 0.5);
+            magmaCubeEarthquakeKnockbackForce = magmaSection.getDouble("earthquake-knockback-force", 1.0);
+            magmaCubeEarthquakeCooldown = magmaSection.getInt("earthquake-cooldown", 120);
+            magmaCubeEnchantedSpawnChance = magmaSection.getDouble("enchanted-spawn-chance", 0.05);
+            magmaCubeMaxPerServer = magmaSection.getInt("max-per-server", 5);
+            debugLog("magma-cube config ロード完了 - interval=" + magmaCubeGrowthInterval + ", maxSize=" + magmaCubeMaxSize
+                    + ", jumpPower=" + magmaCubeEarthquakeJumpPower);
+        } else {
+            debugLog("magma-cube section not found. Using defaults");
+            magmaCubeGrowthInterval = 200;
+            magmaCubeMaxSize = 3;
+            magmaCubeEarthquakeJumpPower = 0.5;
+            magmaCubeEarthquakeKnockbackForce = 1.0;
+            magmaCubeEarthquakeCooldown = 120;
+            magmaCubeEnchantedSpawnChance = 0.05;
+            magmaCubeMaxPerServer = 5;
         }
 
         // 建築AI
@@ -449,38 +596,91 @@ public class EnchantedMobSystem implements Listener {
         campfireScanRange = 5;
         campfireScanHeight = 3;
         campfireTaskInterval = 40;
+        slimeGrowthInterval = 120; // 6秒ごとにサイズ増加
+        slimeMaxSize = 4; // バニラ最大サイズ
+        slimeEarthquakeJumpPower = 0.8; // ジャンプ力
+        slimeEarthquakeKnockbackForce = 1.5; // 吹き飛ばし距離
+        slimeEarthquakeCooldown = 80; // 4秒クールダウン
+        slimeEnchantedSpawnChance = 0.05; // エンチャントスライム出現確率
+        slimeMaxPerServer = 5; // サーバーあたりの最大数
+        slimeBuffAuraRange = 16; // バフオーラ範囲
+        slimeBuffAuraHeight = 8; // バフオーラ高さ
+        slimeBuffAuraInterval = 40; // バフオーラ周期
+        magmaCubeGrowthInterval = 200; // スライムより遅い成長
+        magmaCubeMaxSize = 3; // スライムより1段階小さい
+        magmaCubeEarthquakeJumpPower = 0.5; // スライムの0.625倍
+        magmaCubeEarthquakeKnockbackForce = 1.0; // スライムの0.67倍
+        magmaCubeEarthquakeCooldown = 120; // スライムの1.5倍長い
+        magmaCubeEnchantedSpawnChance = 0.05; // エンチャントマグマキューブ出現確率
+        magmaCubeMaxPerServer = 5; // サーバーあたりの最大数
     }
 
     // --- 1. スポーン時にEnchanted化 ---
     @EventHandler
     public void onSpawn(CreatureSpawnEvent event) { // EntitySpawnEvent から CreatureSpawnEvent に変更
-        // 1. まず「Monsterであるか」を判定し、同時に変数 'monster' を定義する
-        if (!(event.getEntity() instanceof Monster monster)) return;
+        // 1. LivingEntity かを判定
+        if (!(event.getEntity() instanceof LivingEntity entity))
+            return;
 
         // 2. PDCチェック (増援処理などで「判定済み」のマークがある場合はスキップ)
-        if (monster.getPersistentDataContainer().has(enchantedKey, PersistentDataType.BYTE)) return;
+        if (entity.getPersistentDataContainer().has(enchantedKey, PersistentDataType.BYTE))
+            return;
 
         // 3. スポーン理由のチェック (プラグインによるCUSTOMスポーンは除外)
-        if (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.CUSTOM) return;
+        if (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.CUSTOM)
+            return;
 
-        // --- ここから共通の処理 ---
-        startLootingAI(monster);
+        // 分裂によるスポーン時はエンチャント化させない（突然の強敵化を防ぐ）
+        if (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.SLIME_SPLIT)
+            return;
 
-        // Enchanted Mobに進化する確率（config.yml から読み込み）
+        // Monster に対する追加処理
+        if (entity instanceof Monster monster) {
+            startLootingAI(monster);
+        }
+
+        // Enchanted 化の判定
+        if (entity.getType() == EntityType.SLIME) {
+            int currentCount = activeEnchantedSlimes.size();
+            if (currentCount >= slimeMaxPerServer) {
+                debugLog("エンチャントスライムスポーン拒否: 現在=" + currentCount + "/" + slimeMaxPerServer);
+                return; // 制限到達
+            }
+            if (ThreadLocalRandom.current().nextDouble() < slimeEnchantedSpawnChance) {
+                makeEnchanted(entity);
+                activeEnchantedSlimes.add(entity.getUniqueId());
+                debugLog("エンチャントスライムスポーン成功: 現在=" + activeEnchantedSlimes.size() + "/" + slimeMaxPerServer);
+            }
+            return; // 全体の確率処理をスキップ
+        }
+
+        if (entity.getType() == EntityType.MAGMA_CUBE) {
+            int currentCount = activeEnchantedMagmaCubes.size();
+            if (currentCount >= magmaCubeMaxPerServer) {
+                debugLog("エンチャントマグマキューブスポーン拒否: 現在=" + currentCount + "/" + magmaCubeMaxPerServer);
+                return; // 制限到達
+            }
+            if (ThreadLocalRandom.current().nextDouble() < magmaCubeEnchantedSpawnChance) {
+                makeEnchanted(entity);
+                activeEnchantedMagmaCubes.add(entity.getUniqueId());
+                debugLog("エンチャントマグマキューブスポーン成功: 現在=" + activeEnchantedMagmaCubes.size() + "/" + magmaCubeMaxPerServer);
+            }
+            return; // 全体の確率処理をスキップ
+        }
+
         if (ThreadLocalRandom.current().nextDouble() < enchantedSpawnChance) {
-            makeEnchanted(monster);
+            makeEnchanted(entity);
         }
     }
 
-
-
     // コードの可読性のために装備処理を分離
-    private void applyEnchantedEquipment(Monster monster) {
-        EntityEquipment equip = monster.getEquipment();
-        if (equip == null) return;
+    private void applyEnchantedEquipment(LivingEntity entity) {
+        EntityEquipment equip = entity.getEquipment();
+        if (equip == null)
+            return;
 
         // --- C. 【追加】ウィザースケルトン (ネザライト上半身 + 鉄装飾) ---
-        if (monster instanceof WitherSkeleton) {
+        if (entity instanceof WitherSkeleton) {
             ItemStack helmet = new ItemStack(Material.NETHERITE_HELMET);
             ItemStack chest = new ItemStack(Material.NETHERITE_CHESTPLATE);
 
@@ -511,16 +711,16 @@ public class EnchantedMobSystem implements Listener {
         }
 
         // =========================================================
-        //  A. ピグリン系 (ブルート / 通常 / ゾンビ)
+        // A. ピグリン系 (ブルート / 通常 / ゾンビ)
         // =========================================================
         // ※ PigZombie(ZombifiedPiglin)等のクラス名解決のため getType も併用
-        if (monster instanceof Piglin || monster instanceof PiglinBrute ||
-                monster instanceof PigZombie || monster.getType().name().contains("PIGLIN")) {
+        if (entity instanceof Piglin || entity instanceof PiglinBrute ||
+                entity instanceof PigZombie || entity.getType().name().contains("PIGLIN")) {
 
             ItemStack helmet;
             ItemStack chest = null;
 
-            if (monster instanceof PiglinBrute) {
+            if (entity instanceof PiglinBrute) {
                 // --- 1. ブルート：ネザライトヘルメットのみ ---
                 helmet = new ItemStack(Material.NETHERITE_HELMET);
 
@@ -545,10 +745,15 @@ public class EnchantedMobSystem implements Listener {
                 ItemStack weapon;
                 String category = "SWORD";
 
-                if (roll < 0.60) weapon = new ItemStack(Material.GOLDEN_SWORD);
-                else if (roll < 0.80) weapon = new ItemStack(Material.IRON_SWORD);
-                else if (roll < 0.95) { weapon = new ItemStack(Material.GOLDEN_AXE); category = "AXE"; }
-                else weapon = new ItemStack(Material.NETHERITE_SWORD);
+                if (roll < 0.60)
+                    weapon = new ItemStack(Material.GOLDEN_SWORD);
+                else if (roll < 0.80)
+                    weapon = new ItemStack(Material.IRON_SWORD);
+                else if (roll < 0.95) {
+                    weapon = new ItemStack(Material.GOLDEN_AXE);
+                    category = "AXE";
+                } else
+                    weapon = new ItemStack(Material.NETHERITE_SWORD);
 
                 applyVanillaEnchants(weapon, category);
                 equip.setItemInMainHand(weapon);
@@ -580,15 +785,15 @@ public class EnchantedMobSystem implements Listener {
         }
 
         // =========================================================
-        //  B. 通常のゾンビ & スケルトン (既存のロジック)
+        // B. 通常のゾンビ & スケルトン (既存のロジック)
         // =========================================================
         ItemStack helmet = new ItemStack(Material.IRON_HELMET);
         ItemStack chest = new ItemStack(Material.IRON_CHESTPLATE);
 
-        if (monster instanceof Zombie) {
+        if (entity instanceof Zombie) {
             applyArmorTrim(helmet, TrimMaterial.DIAMOND);
             applyArmorTrim(chest, TrimMaterial.DIAMOND);
-        } else if (monster instanceof Skeleton) {
+        } else if (entity instanceof Skeleton) {
             applyArmorTrim(helmet, TrimMaterial.AMETHYST);
             applyArmorTrim(chest, TrimMaterial.AMETHYST);
         }
@@ -607,15 +812,24 @@ public class EnchantedMobSystem implements Listener {
         ItemStack weapon = null;
         String category = "";
 
-        if (monster instanceof Zombie) {
+        if (entity instanceof Zombie) {
             double roll = ThreadLocalRandom.current().nextDouble();
             if (roll < 0.4) {
-                if (roll < 0.05) { weapon = new ItemStack(Material.DIAMOND_SWORD); category = "SWORD"; }
-                else if (roll < 0.15) { weapon = new ItemStack(Material.IRON_AXE); category = "AXE"; }
-                else if (roll < 0.25) { weapon = new ItemStack(Material.CROSSBOW); category = "CROSSBOW"; }
-                else { weapon = new ItemStack(Material.IRON_SWORD); category = "SWORD"; }
+                if (roll < 0.05) {
+                    weapon = new ItemStack(Material.DIAMOND_SWORD);
+                    category = "SWORD";
+                } else if (roll < 0.15) {
+                    weapon = new ItemStack(Material.IRON_AXE);
+                    category = "AXE";
+                } else if (roll < 0.25) {
+                    weapon = new ItemStack(Material.CROSSBOW);
+                    category = "CROSSBOW";
+                } else {
+                    weapon = new ItemStack(Material.IRON_SWORD);
+                    category = "SWORD";
+                }
             }
-        } else if (monster instanceof Skeleton) {
+        } else if (entity instanceof Skeleton) {
             weapon = new ItemStack(Material.BOW);
             category = "BOW";
         }
@@ -632,13 +846,13 @@ public class EnchantedMobSystem implements Listener {
      * 防具に鍛冶型（装飾）を適用するヘルパーメソッド
      */
     private void applyArmorTrim(ItemStack item, org.bukkit.inventory.meta.trim.TrimMaterial material) {
-        if (!(item.getItemMeta() instanceof org.bukkit.inventory.meta.ArmorMeta armorMeta)) return;
+        if (!(item.getItemMeta() instanceof org.bukkit.inventory.meta.ArmorMeta armorMeta))
+            return;
 
         // パターン：SENTRY（番人）- 職人が作り込んだような幾何学模様
         org.bukkit.inventory.meta.trim.ArmorTrim trim = new org.bukkit.inventory.meta.trim.ArmorTrim(
                 material,
-                org.bukkit.inventory.meta.trim.TrimPattern.SHAPER
-        );
+                org.bukkit.inventory.meta.trim.TrimPattern.SHAPER);
 
         armorMeta.setTrim(trim);
         item.setItemMeta(armorMeta);
@@ -653,7 +867,9 @@ public class EnchantedMobSystem implements Listener {
         // カテゴリー別・付与可能リスト
         switch (category) {
             case "ARMOR":
-                possible.addAll(Arrays.asList(Enchantment.PROTECTION, Enchantment.THORNS, Enchantment.UNBREAKING, Enchantment.THORNS, Enchantment.BLAST_PROTECTION, Enchantment.FIRE_PROTECTION, Enchantment.PROJECTILE_PROTECTION));
+                possible.addAll(Arrays.asList(Enchantment.PROTECTION, Enchantment.THORNS, Enchantment.UNBREAKING,
+                        Enchantment.THORNS, Enchantment.BLAST_PROTECTION, Enchantment.FIRE_PROTECTION,
+                        Enchantment.PROJECTILE_PROTECTION));
                 break;
             case "SWORD":
                 possible.addAll(Arrays.asList(Enchantment.SHARPNESS, Enchantment.KNOCKBACK, Enchantment.FIRE_ASPECT));
@@ -662,14 +878,16 @@ public class EnchantedMobSystem implements Listener {
                 possible.addAll(Arrays.asList(Enchantment.SHARPNESS, Enchantment.EFFICIENCY));
                 break;
             case "BOW":
-                possible.addAll(Arrays.asList(Enchantment.POWER, Enchantment.PUNCH, Enchantment.FLAME, Enchantment.INFINITY));
+                possible.addAll(
+                        Arrays.asList(Enchantment.POWER, Enchantment.PUNCH, Enchantment.FLAME, Enchantment.INFINITY));
                 break;
             case "CROSSBOW":
                 possible.addAll(Arrays.asList(Enchantment.QUICK_CHARGE, Enchantment.MULTISHOT, Enchantment.PIERCING));
                 break;
         }
 
-        if (possible.isEmpty()) return;
+        if (possible.isEmpty())
+            return;
 
         // シャッフルして付与する個数を決める (1〜3個)
         Collections.shuffle(possible);
@@ -687,11 +905,20 @@ public class EnchantedMobSystem implements Listener {
             item.addUnsafeEnchantment(ench, level);
         }
     }
+
+    /**
+     * デバッグメッセージをログ出力（debugModeが有効な場合のみ）
+     */
+    private void debugLog(String message) {
+        if (debugMode) {
+            plugin.getLogger().info("DEBUG: " + message);
+        }
+    }
+
     private boolean isEnchanted(Entity entity) {
         Byte b = entity.getPersistentDataContainer().get(enchantedKey, PersistentDataType.BYTE);
         return b != null && b == (byte) 1;
     }
-
 
     private void startVisualAura(Monster monster) {
         org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
@@ -708,7 +935,8 @@ public class EnchantedMobSystem implements Listener {
                 Location eyeLoc = baseLoc.clone().add(0, 1.2, 0);
 
                 // REDSTONE を DustOptions で表現 (カラー指定)
-                monster.getWorld().spawnParticle(Particle.DUST, eyeLoc, 1, new Particle.DustOptions(Color.FUCHSIA, 1.0f));
+                monster.getWorld().spawnParticle(Particle.DUST, eyeLoc, 1,
+                        new Particle.DustOptions(Color.FUCHSIA, 1.0f));
 
                 // 螺旋 (WITCH はデータ不要)
                 double x = Math.cos(angle) * spiralRadius;
@@ -730,60 +958,189 @@ public class EnchantedMobSystem implements Listener {
                     monster.getWorld().spawnParticle(Particle.SQUID_INK, eyeLoc, 1, 0.3, 0.2, 0.3, 0.05);
                 } else {
                     // REDSTONE を DustOptions で表現 (カラー指定)
-                    monster.getWorld().spawnParticle(Particle.DUST, eyeLoc, 1, new Particle.DustOptions(Color.FUCHSIA, 1.0f));
+                    monster.getWorld().spawnParticle(Particle.DUST, eyeLoc, 1,
+                            new Particle.DustOptions(Color.FUCHSIA, 1.0f));
                 }
             }
         }.runTaskTimer(plugin, 0, auraUpdateInterval);
         registerMobTask(monster, t.getTaskId());
     }
 
-    public void makeEnchanted(Monster monster) {
-        monster.getPersistentDataContainer().set(enchantedKey, PersistentDataType.BYTE, (byte) 1);
+    /**
+     * スライム・マグマキューブ用のビジュアルオーラ
+     * LivingEntity をベースにしているため、Monster の限定メソッドに依存しない
+     */
+    private <T extends LivingEntity> void startLivingEntityVisualAura(T entity) {
+        org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
+            double angle = 0;
 
-        // 基本ステータス（HP・名前）の適用
-        var hp = monster.getAttribute(Attribute.MAX_HEALTH);
-        if (hp != null) {
-            hp.setBaseValue(hp.getBaseValue() * hpMultiplier);
-            monster.setHealth(hp.getBaseValue());
+            @Override
+            public void run() {
+                if (!entity.isValid() || entity.isDead()) {
+                    cancel();
+                    return;
+                }
+
+                Location baseLoc = entity.getLocation();
+                Location eyeLoc = baseLoc.clone().add(0, 1.2, 0);
+
+                // 共通: マゼンタ色の DustOptions
+                entity.getWorld().spawnParticle(Particle.DUST, eyeLoc, 1,
+                        new Particle.DustOptions(Color.FUCHSIA, 1.0f));
+
+                // 螺旋
+                double x = Math.cos(angle) * spiralRadius;
+                double z = Math.sin(angle) * spiralRadius;
+                Location spiralLoc = baseLoc.clone().add(x, (angle % (Math.PI * 2)) / 3, z);
+                entity.getWorld().spawnParticle(Particle.WITCH, spiralLoc, 1, 0.0, 0.0, 0.0, 0.0);
+                angle += spiralAngleIncrement;
+
+                // 種族別エフェクト
+                if (entity instanceof Slime slime) {
+                    // スライム: 黄緑色のダスト（ランダム位置、サイズ依存）
+                    int size = slime.getSize();
+                    double sizeRadius = size * 0.3; // サイズに応じた半径
+
+                    for (int i = 0; i < 3; i++) {
+                        double randomAngle = Math.random() * Math.PI * 2;
+                        double randomDist = Math.random() * sizeRadius;
+                        double offsetY = Math.random() * (size * 0.2);
+
+                        Location randomLoc = baseLoc.clone().add(
+                                Math.cos(randomAngle) * randomDist,
+                                offsetY,
+                                Math.sin(randomAngle) * randomDist);
+                        entity.getWorld().spawnParticle(Particle.DUST, randomLoc, 1,
+                                new Particle.DustOptions(Color.fromRGB(173, 255, 47), 1.0f));
+                    }
+                } else if (entity instanceof MagmaCube magma) {
+                    // マグマキューブ: 赤色のダスト（ランダム位置、サイズ依存）
+                    int size = magma.getSize();
+                    double sizeRadius = size * 0.3; // サイズに応じた半径
+
+                    for (int i = 0; i < 2; i++) {
+                        double randomAngle = Math.random() * Math.PI * 2;
+                        double randomDist = Math.random() * sizeRadius;
+                        double offsetY = Math.random() * (size * 0.2);
+
+                        Location randomLoc = baseLoc.clone().add(
+                                Math.cos(randomAngle) * randomDist,
+                                offsetY,
+                                Math.sin(randomAngle) * randomDist);
+                        entity.getWorld().spawnParticle(Particle.DUST, randomLoc, 1,
+                                new Particle.DustOptions(Color.RED, 1.0f));
+                    }
+                    entity.getWorld().spawnParticle(Particle.LAVA, eyeLoc, 2, 0.3, 0.3, 0.3, 0.0);
+                }
+            }
+        }.runTaskTimer(plugin, 0, auraUpdateInterval);
+
+        // LivingEntity の場合、タスク登録は型に応じて条件付き
+        if (entity instanceof Mob mob) {
+            registerMobTask(mob, t.getTaskId());
+        }
+    }
+    // === パブリックAPI: トラッキングセットへの登録・カウント取得 ===
+
+    /** エンチャントスライムをトラッキングセットに登録する */
+    public void registerEnchantedSlime(LivingEntity entity) {
+        activeEnchantedSlimes.add(entity.getUniqueId());
+        debugLog("エンチャントスライム登録（コマンド経由）: 現在=" + activeEnchantedSlimes.size() + "/" + slimeMaxPerServer);
+    }
+
+    /** エンチャントマグマキューブをトラッキングセットに登録する */
+    public void registerEnchantedMagmaCube(LivingEntity entity) {
+        activeEnchantedMagmaCubes.add(entity.getUniqueId());
+        debugLog("エンチャントマグマキューブ登録（コマンド経由）: 現在=" + activeEnchantedMagmaCubes.size() + "/" + magmaCubeMaxPerServer);
+    }
+
+    /** 現在のエンチャントスライム数を返す */
+    public int getActiveEnchantedSlimeCount() {
+        return activeEnchantedSlimes.size();
+    }
+
+    /** 現在のエンチャントマグマキューブ数を返す */
+    public int getActiveEnchantedMagmaCubeCount() {
+        return activeEnchantedMagmaCubes.size();
+    }
+
+    public void makeEnchanted(LivingEntity entity) {
+        makeEnchanted(entity, false);
+    }
+
+    /**
+     * Enchant the entity with optional force bypassing the allowed-types whitelist.
+     */
+    public void makeEnchanted(LivingEntity entity, boolean force) {
+        debugLog("makeEnchanted 呼び出し: entityType=" + entity.getType().getName() + ", force=" + force
+                + ", allowedTypesSize=" + allowedEnchantedTypes.size());
+
+        // 許可リストに存在しない種族はスキップ（force=true ならスキップしない）
+        if (!force && !allowedEnchantedTypes.isEmpty() && !allowedEnchantedTypes.contains(entity.getType())) {
+            debugLog("ホワイトリストに含まれていないため スキップ");
+            return;
         }
 
-        var speed = monster.getAttribute(Attribute.MOVEMENT_SPEED);
+        entity.getPersistentDataContainer().set(enchantedKey, PersistentDataType.BYTE, (byte) 1);
+
+        // 基本ステータス（HP・名前）の適用
+        var hp = entity.getAttribute(Attribute.MAX_HEALTH);
+        if (hp != null) {
+            hp.setBaseValue(hp.getBaseValue() * hpMultiplier);
+            entity.setHealth(hp.getBaseValue());
+        }
+
+        var speed = entity.getAttribute(Attribute.MOVEMENT_SPEED);
         if (speed != null) {
             speed.setBaseValue(movementSpeed);
         }
 
-        monster.setCustomName("§d§lEnchanted " + monster.getType().getName());
-        monster.setCustomNameVisible(false);
+        entity.setCustomName("§d§lEnchanted " + entity.getType().getName());
+        entity.setCustomNameVisible(false);
 
-        // 装備の設定
-        applyEnchantedEquipment(monster);
+        // 装備の設定（LivingEntity を受け取るよう変更）
+        applyEnchantedEquipment(entity);
 
-        startCoreNavigationAI(monster);
+        // コアナビゲーションは Mob/Monster に対してのみ開始
+        if (entity instanceof Monster m)
+            startCoreNavigationAI(m);
 
         // --- 種類別AIの有効化 (ここが統合のキモです) ---
-        if (monster instanceof Zombie zombie) {
-            startClimbingAI(zombie);    // 建築
+        if (entity instanceof Zombie zombie) {
+            startClimbingAI(zombie); // 建築
             startCommanderAura(zombie); // 指揮官
-            startLootingAI(zombie);     // 拾得
-        } else if (monster instanceof Skeleton skeleton) {
-            startClimbingAI(skeleton);  // 建築
-            startLootingAI(skeleton);   // 拾得
-            // ※偏差撃ちなどはEvent側で判定されるためタスク起動は不要
-        } else if (monster instanceof Creeper creeper) {
-            startBurstAI(creeper);      // 【追加】バースト突進
-        } else if (monster instanceof Spider spider) {
-            
-            // ※クモのWebTrap/飛びかかりはEvent/個体判定で処理
-        }else if (monster instanceof PiglinBrute brute) {
+            startLootingAI(zombie); // 拾得
+        } else if (entity instanceof Skeleton skeleton) {
+            startClimbingAI(skeleton); // 建築
+            startLootingAI(skeleton); // 拾得
+        } else if (entity instanceof Creeper creeper) {
+            startBurstAI(creeper); // 【追加】バースト突進
+        } else if (entity instanceof Spider spider) {
+            // クモ固有処理はイベント/判定側で処理
+        } else if (entity instanceof Slime slime) {
+            debugLog("Slime をエンチャント化しています。初期値: slimeGrowthInterval=" + slimeGrowthInterval + ", slimeMaxSize="
+                    + slimeMaxSize);
+            startGrowthAI(slime, slimeGrowthInterval, slimeMaxSize); // 成長能力
+            startEarthquakeJumpAI(slime, slimeEarthquakeJumpPower, slimeEarthquakeKnockbackForce,
+                    slimeEarthquakeCooldown); // 地鳴らしジャンプ
+            startLivingEntityVisualAura(slime); // ビジュアルオーラ
+            startSlimeCommanderAura(slime); // 周囲ノーマルスライムへのバフオーラ
+        } else if (entity instanceof MagmaCube magma) {
+            debugLog("MagmaCube をエンチャント化しています。初期値: magmaCubeGrowthInterval=" + magmaCubeGrowthInterval
+                    + ", magmaCubeMaxSize=" + magmaCubeMaxSize);
+            startGrowthAI(magma, magmaCubeGrowthInterval, magmaCubeMaxSize); // 成長能力（弱体化版）
+            startEarthquakeJumpAI(magma, magmaCubeEarthquakeJumpPower, magmaCubeEarthquakeKnockbackForce,
+                    magmaCubeEarthquakeCooldown); // 地鳴らしジャンプ
+            startLivingEntityVisualAura(magma); // ビジュアルオーラ
+        } else if (entity instanceof PiglinBrute brute) {
             startClimbingAI(brute);
             startLootingAI(brute);
-            // 指揮官ゾンビと同様の「群れ呼び出し」をブルートにも適用
-            // 注意：このメソッドを呼び出すためのトリガー（索敵時など）が必要です
             startBruteCommanderAI(brute);
         }
 
-        // 共通オーラエフェクトの開始
-        startVisualAura(monster);
+        // 共通オーラエフェクトの開始（Monster のみ）
+        if (entity instanceof Monster mon)
+            startVisualAura(mon);
     }
 
     private void startCoreNavigationAI(Monster monster) {
@@ -821,12 +1178,14 @@ public class EnchantedMobSystem implements Listener {
                     } else if (lastKnownLocation != null) {
                         // ターゲットを見失っても、最後に見た場所へ向かう
                         monster.getPathfinder().moveTo(lastKnownLocation, baseSpeed);
-                        if (mLoc.distance(lastKnownLocation) < 2) lastKnownLocation = null;
+                        if (mLoc.distance(lastKnownLocation) < 2)
+                            lastKnownLocation = null;
                         return;
                     }
                 }
 
-                if (target == null) return;
+                if (target == null)
+                    return;
 
                 // ターゲットの位置を常に記憶
                 lastKnownLocation = target.getLocation();
@@ -842,7 +1201,8 @@ public class EnchantedMobSystem implements Listener {
 
                 if (stuckTicks > stuckTicksThreshold && monster.isOnGround()) {
                     // スタック時の自己復帰ジャンプ
-                    Vector jumpDir = target.getLocation().toVector().subtract(mLoc.toVector()).normalize().multiply(stuckJumpHorizontal).setY(stuckJumpPower);
+                    Vector jumpDir = target.getLocation().toVector().subtract(mLoc.toVector()).normalize()
+                            .multiply(stuckJumpHorizontal).setY(stuckJumpPower);
                     monster.setVelocity(jumpDir);
                     stuckTicks = 0;
                 }
@@ -890,7 +1250,8 @@ public class EnchantedMobSystem implements Listener {
                     // クモの場合：壁登りを物理的に加速させる
                     if (diffY > 1 && distance < 8) {
                         // 真上ではなくターゲット方向へ吸い付くような力を加える
-                        Vector climb = target.getLocation().toVector().subtract(mLoc.toVector()).normalize().multiply(0.15).setY(0.25);
+                        Vector climb = target.getLocation().toVector().subtract(mLoc.toVector()).normalize()
+                                .multiply(0.15).setY(0.25);
                         spider.setVelocity(spider.getVelocity().add(climb));
                     }
                 } else if (diffY > 2 && distance < 3 && monster.isOnGround()) {
@@ -907,46 +1268,79 @@ public class EnchantedMobSystem implements Listener {
      * 新しい設定で再スケジュールします。
      */
     public void rescheduleAllEnchantedMobs() {
+        // トラッキングセットをクリアして再構築する（制限カウントの完全リセット）
+        activeEnchantedSlimes.clear();
+        activeEnchantedMagmaCubes.clear();
+
         for (org.bukkit.World world : Bukkit.getWorlds()) {
             for (org.bukkit.entity.Entity e : world.getEntities()) {
-                if (!(e instanceof Monster m)) continue;
-                if (!isEnchanted(m)) continue;
+                if (!(e instanceof LivingEntity le))
+                    continue;
+                if (!isEnchanted(le))
+                    continue;
 
-                // 既存タスクをキャンセル
-                cancelMobTasks(m);
+                // Mob の場合は既存タスクをキャンセル
+                if (le instanceof Mob m) {
+                    cancelMobTasksForMob(m);
+                }
 
                 // ステータス反映（移動速度などは即時適用）
-                var speedAttr = m.getAttribute(Attribute.MOVEMENT_SPEED);
-                if (speedAttr != null) {
-                    speedAttr.setBaseValue(movementSpeed);
+                if (le instanceof Mob m) {
+                    var speedAttr = m.getAttribute(Attribute.MOVEMENT_SPEED);
+                    if (speedAttr != null) {
+                        speedAttr.setBaseValue(movementSpeed);
+                    }
                 }
 
                 // 各種AIを再スケジュール
-                startCoreNavigationAI(m);
-                startVisualAura(m);
+                if (le instanceof Monster monster) {
+                    startCoreNavigationAI(monster);
+                    startVisualAura(monster);
 
-                if (m instanceof Zombie zombie) {
-                    startClimbingAI(zombie);
-                    startCommanderAura(zombie);
-                    startLootingAI(zombie);
-                } else if (m instanceof Skeleton skeleton) {
-                    startClimbingAI(skeleton);
-                    startLootingAI(skeleton);
-                } else if (m instanceof Creeper creeper) {
-                    startBurstAI(creeper);
-                } else if (m instanceof Spider) {
-                    // Spider-specific behaviors are event-driven; nothing to schedule here
+                    if (monster instanceof Zombie zombie) {
+                        startClimbingAI(zombie);
+                        startCommanderAura(zombie);
+                        startLootingAI(zombie);
+                    } else if (monster instanceof Skeleton skeleton) {
+                        startClimbingAI(skeleton);
+                        startLootingAI(skeleton);
+                    } else if (monster instanceof Creeper creeper) {
+                        startBurstAI(creeper);
+                    } else if (monster instanceof Spider) {
+                        // Spider-specific behaviors are event-driven; nothing to schedule here
+                    }
+                }
+
+                // Slime と MagmaCube も再スケジュール + トラッキングセットに再登録
+                if (le instanceof Slime slime && !(le instanceof MagmaCube)) {
+                    activeEnchantedSlimes.add(le.getUniqueId());
+                    startGrowthAI(slime, slimeGrowthInterval, slimeMaxSize);
+                    startEarthquakeJumpAI(slime, slimeEarthquakeJumpPower, slimeEarthquakeKnockbackForce,
+                            slimeEarthquakeCooldown);
+                    startLivingEntityVisualAura(slime);
+                    startSlimeCommanderAura(slime);
+                } else if (le instanceof MagmaCube magma) {
+                    activeEnchantedMagmaCubes.add(le.getUniqueId());
+                    startGrowthAI(magma, magmaCubeGrowthInterval, magmaCubeMaxSize);
+                    startEarthquakeJumpAI(magma, magmaCubeEarthquakeJumpPower, magmaCubeEarthquakeKnockbackForce,
+                            magmaCubeEarthquakeCooldown);
+                    startLivingEntityVisualAura(magma);
                 }
             }
         }
+        debugLog("rescheduleAllEnchantedMobs 完了: スライム=" + activeEnchantedSlimes.size()
+                + "/" + slimeMaxPerServer + ", マグマキューブ=" + activeEnchantedMagmaCubes.size()
+                + "/" + magmaCubeMaxPerServer);
     }
 
     // --- 2. スケルトンのAI強化 (偏差撃ち & バックステップ) ---
     @EventHandler
     public void onSkeletonShoot(EntityShootBowEvent event) {
         // 判定に WitherSkeleton を追加
-        if (!(event.getEntity() instanceof AbstractSkeleton skeleton) || !isEnchanted(skeleton)) return;
-        if (!(skeleton.getTarget() instanceof Player player)) return;
+        if (!(event.getEntity() instanceof AbstractSkeleton skeleton) || !isEnchanted(skeleton))
+            return;
+        if (!(skeleton.getTarget() instanceof Player player))
+            return;
 
         // 1. 基本情報の取得
         Location sLoc = skeleton.getEyeLocation();
@@ -983,7 +1377,8 @@ public class EnchantedMobSystem implements Listener {
         new BukkitRunnable() {
             @Override
             public void run() {
-                if (arrow.isValid() && !arrow.isOnGround()) arrow.remove();
+                if (arrow.isValid() && !arrow.isOnGround())
+                    arrow.remove();
             }
         }.runTaskLater(plugin, 100);
 
@@ -1017,7 +1412,8 @@ public class EnchantedMobSystem implements Listener {
                 }
 
                 // ターゲットへの方向を毎チック再計算（ホーミング）
-                Vector toTarget = target.getEyeLocation().toVector().subtract(homingArrow.getLocation().toVector()).normalize();
+                Vector toTarget = target.getEyeLocation().toVector().subtract(homingArrow.getLocation().toVector())
+                        .normalize();
 
                 // 低速でじわじわ追いかける
                 homingArrow.setVelocity(toTarget.multiply(homingArrowSpeed));
@@ -1034,8 +1430,10 @@ public class EnchantedMobSystem implements Listener {
 
     @EventHandler
     public void onSkeletonAI(EntityTargetLivingEntityEvent event) {
-        if (!(event.getEntity() instanceof Skeleton skeleton) || !isEnchanted(skeleton)) return;
-        if (!(event.getTarget() instanceof Player player)) return;
+        if (!(event.getEntity() instanceof Skeleton skeleton) || !isEnchanted(skeleton))
+            return;
+        if (!(event.getTarget() instanceof Player player))
+            return;
         org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
             @Override
             public void run() {
@@ -1052,7 +1450,8 @@ public class EnchantedMobSystem implements Listener {
 
                 double dist = skeleton.getLocation().distance(player.getLocation());
                 EntityEquipment equip = skeleton.getEquipment();
-                if (equip == null) return;
+                if (equip == null)
+                    return;
 
                 // --- 接近モード (5マス以内) ---
                 if (dist <= 5.0) {
@@ -1158,6 +1557,19 @@ public class EnchantedMobSystem implements Listener {
     public void onMonsterDeath(org.bukkit.event.entity.EntityDeathEvent event) {
         if (event.getEntity() instanceof Monster m) {
             cancelMobTasks(m);
+        } else if (event.getEntity() instanceof Mob mob) {
+            // Slime/MagmaCubeはMonsterではなくMobなので別途タスクをキャンセル
+            cancelMobTasksForMob(mob);
+        }
+        if (isEnchanted(event.getEntity())) {
+            boolean removedSlime = activeEnchantedSlimes.remove(event.getEntity().getUniqueId());
+            boolean removedMagma = activeEnchantedMagmaCubes.remove(event.getEntity().getUniqueId());
+            if (removedSlime) {
+                debugLog("エンチャントスライム死亡: 残り=" + activeEnchantedSlimes.size() + "/" + slimeMaxPerServer);
+            }
+            if (removedMagma) {
+                debugLog("エンチャントマグマキューブ死亡: 残り=" + activeEnchantedMagmaCubes.size() + "/" + magmaCubeMaxPerServer);
+            }
         }
     }
 
@@ -1166,14 +1578,132 @@ public class EnchantedMobSystem implements Listener {
         for (org.bukkit.entity.Entity e : event.getChunk().getEntities()) {
             if (e instanceof Monster m) {
                 cancelMobTasks(m);
+            } else if (e instanceof Mob mob) {
+                // Slime/MagmaCubeのタスクもキャンセル
+                cancelMobTasksForMob(mob);
+            }
+            // エンチャント済み個体のみトラッキングをクリア
+            if (isEnchanted(e)) {
+                activeEnchantedSlimes.remove(e.getUniqueId());
+                activeEnchantedMagmaCubes.remove(e.getUniqueId());
             }
         }
     }
+
+    // チャンクロード時にエンチャント済みスライム・マグマキューブのトラッキング復元 & AI再スケジュール
+    @EventHandler
+    public void onChunkLoad(org.bukkit.event.world.ChunkLoadEvent event) {
+        for (org.bukkit.entity.Entity e : event.getChunk().getEntities()) {
+            if (!(e instanceof LivingEntity le))
+                continue;
+            if (!isEnchanted(le))
+                continue;
+
+            // トラッキングセットへの復元 + AI再スケジュール
+            if (le instanceof Slime slime && !(le instanceof MagmaCube)) {
+                activeEnchantedSlimes.add(le.getUniqueId());
+                startGrowthAI(slime, slimeGrowthInterval, slimeMaxSize);
+                startEarthquakeJumpAI(slime, slimeEarthquakeJumpPower, slimeEarthquakeKnockbackForce,
+                        slimeEarthquakeCooldown);
+                startLivingEntityVisualAura(slime);
+                startSlimeCommanderAura(slime);
+                debugLog("チャンクロード: エンチャントスライム復元+AI再開 現在=" + activeEnchantedSlimes.size() + "/" + slimeMaxPerServer);
+            } else if (le instanceof MagmaCube magma) {
+                activeEnchantedMagmaCubes.add(le.getUniqueId());
+                startGrowthAI(magma, magmaCubeGrowthInterval, magmaCubeMaxSize);
+                startEarthquakeJumpAI(magma, magmaCubeEarthquakeJumpPower, magmaCubeEarthquakeKnockbackForce,
+                        magmaCubeEarthquakeCooldown);
+                startLivingEntityVisualAura(magma);
+                debugLog("チャンクロード: エンチャントマグマキューブ復元+AI再開 現在=" + activeEnchantedMagmaCubes.size() + "/"
+                        + magmaCubeMaxPerServer);
+            }
+        }
+    }
+
+    // エンチャントされたスライム・マグマキューブの分裂制御（上限チェック付き）
+    @EventHandler
+    public void onSlimeSplit(org.bukkit.event.entity.SlimeSplitEvent event) {
+        if (!isEnchanted(event.getEntity()))
+            return;
+
+        Slime parent = event.getEntity();
+        boolean isMagmaCube = parent instanceof MagmaCube;
+        java.util.Set<java.util.UUID> trackingSet = isMagmaCube ? activeEnchantedMagmaCubes : activeEnchantedSlimes;
+        int maxCount = isMagmaCube ? magmaCubeMaxPerServer : slimeMaxPerServer;
+        int splitCount = event.getCount();
+        String typeName = isMagmaCube ? "マグマキューブ" : "スライム";
+
+        // DeathEvent が先に発火して親が既にセットから除去済みかを判定
+        boolean parentStillTracked = trackingSet.contains(parent.getUniqueId());
+        int currentCount = trackingSet.size();
+        // 親がまだセットにいる場合のみ -1 する（DeathEvent で既に除去済みなら 0）
+        int parentAdjustment = parentStillTracked ? -1 : 0;
+        int projectedTotal = currentCount + parentAdjustment + splitCount;
+
+        if (projectedTotal > maxCount) {
+            event.setCancelled(true);
+            debugLog("エンチャント" + typeName
+                    + "分裂キャンセル（上限超過）: 現在=" + currentCount
+                    + ", 親除去済=" + !parentStillTracked
+                    + ", 分裂数=" + splitCount
+                    + ", 投影後=" + projectedTotal + "/" + maxCount);
+            org.bukkit.Location loc = parent.getLocation();
+            parent.getWorld().spawnParticle(org.bukkit.Particle.EXPLOSION, loc, 1);
+            return;
+        }
+
+        debugLog("エンチャント" + typeName
+                + "分裂許可: 現在=" + currentCount
+                + ", 親除去済=" + !parentStillTracked
+                + ", 分裂数=" + splitCount
+                + ", 投影後=" + projectedTotal + "/" + maxCount);
+
+        // 親をトラッキングから除去（まだ残っている場合のみ）
+        if (parentStillTracked) {
+            trackingSet.remove(parent.getUniqueId());
+        }
+        cancelMobTasksForMob(parent);
+
+        // 分裂後の子スライムにエンチャント化を継承（数ティック後に生成されるため遅延実行）
+        final int maxForType = maxCount;
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                for (Entity nearbyEntity : parent.getNearbyEntities(5, 5, 5)) {
+                    // 子の登録ごとに上限を再チェック
+                    if (trackingSet.size() >= maxForType) {
+                        debugLog("子" + typeName + "エンチャント化中止（上限到達）: 現在="
+                                + trackingSet.size() + "/" + maxForType);
+                        break;
+                    }
+                    if (isMagmaCube) {
+                        if (nearbyEntity instanceof MagmaCube child && !isEnchanted(child)) {
+                            makeEnchanted(child, true);
+                            trackingSet.add(child.getUniqueId());
+                            debugLog("子マグマキューブをエンチャント化: サイズ=" + child.getSize()
+                                    + ", 現在=" + trackingSet.size() + "/" + maxForType);
+                        }
+                    } else {
+                        if (nearbyEntity instanceof Slime child && !(nearbyEntity instanceof MagmaCube)
+                                && !isEnchanted(child)) {
+                            makeEnchanted(child, true);
+                            trackingSet.add(child.getUniqueId());
+                            debugLog("子スライムをエンチャント化: サイズ=" + child.getSize()
+                                    + ", 現在=" + trackingSet.size() + "/" + maxForType);
+                        }
+                    }
+                }
+            }
+        }.runTaskLater(plugin, 2);
+    }
+
     // --- 6. クリーパーのAI: サイドステップ & 不意打ち加速 ---
     @EventHandler
     public void onCreeperUpdate(EntityTargetLivingEntityEvent event) {
-        if (!(event.getEntity() instanceof Creeper creeper) || !isEnchanted(creeper)) return;
-        if (!(event.getTarget() instanceof Player player)) return;
+        if (!(event.getEntity() instanceof Creeper creeper) || !isEnchanted(creeper))
+            return;
+        if (!(event.getTarget() instanceof Player player))
+            return;
 
         new BukkitRunnable() {
             @Override
@@ -1197,8 +1727,10 @@ public class EnchantedMobSystem implements Listener {
 
                 // A. サイドステップ (プレイヤーに見られている時)
                 if (dot > creeperVisibilityThreshold && distance < creeperSidestepDistance) { // 視線がほぼクリーパーを捉えている
-                    Vector sideStep = new Vector(-playerDirection.getZ(), 0, playerDirection.getX()).normalize().multiply(creeperSidestepForce);
-                    if (random.nextBoolean()) sideStep.multiply(-1); // 左右ランダム
+                    Vector sideStep = new Vector(-playerDirection.getZ(), 0, playerDirection.getX()).normalize()
+                            .multiply(creeperSidestepForce);
+                    if (random.nextBoolean())
+                        sideStep.multiply(-1); // 左右ランダム
                     creeper.setVelocity(creeper.getVelocity().add(sideStep));
                     creeper.getWorld().spawnParticle(Particle.CLOUD, cLoc, 1, 0.1, 0.1, 0.1, 0.05);
                 }
@@ -1225,12 +1757,14 @@ public class EnchantedMobSystem implements Listener {
         leadZombie.setTarget(target);
 
         // 2. 周囲のゾンビを呼ぶ
-        for (Entity nearby : leadZombie.getNearbyEntities(swarmDetectionRange, commanderAuraHeight / 2, swarmDetectionRange)) {
+        for (Entity nearby : leadZombie.getNearbyEntities(swarmDetectionRange, commanderAuraHeight / 2,
+                swarmDetectionRange)) {
             if (nearby instanceof Zombie fellow) {
                 // 指揮官と同じターゲットを強制設定
                 fellow.setTarget(target);
 
-                /* * ポーション効果による加速バフ
+                /*
+                 * * ポーション効果による加速バフ
                  * PotionEffect(Type, Duration, Amplifier, Ambient, Particles, Icon)
                  * 移動速度上昇 II (Lv2) を 10秒間 (200 ticks) 付与。
                  * Amplifier を 1 に設定することで、バニラの Speed II と同じ速さになります。
@@ -1240,19 +1774,22 @@ public class EnchantedMobSystem implements Listener {
                 // 仲間が反応した視覚演出
                 if (random.nextDouble() < 0.3) { // 確率を少し上げて反応をわかりやすく
                     // VILLAGER_ANGRY（怒りパーティクル）が解決できない場合は VILLAGER_HAPPY 等で代用
-                    fellow.getWorld().spawnParticle(Particle.ANGRY_VILLAGER, fellow.getLocation().add(0, 2, 0), 3, 0.2, 0.2, 0.2, 0);
+                    fellow.getWorld().spawnParticle(Particle.ANGRY_VILLAGER, fellow.getLocation().add(0, 2, 0), 3, 0.2,
+                            0.2, 0.2, 0);
                 }
             }
         }
 
     }
+
     private void applyPiglinBruteSwarm(PiglinBrute leadBrute, Player target) {
         // 1. 本人も確実にターゲットを追わせる
         leadBrute.setTarget(target);
 
         // 2. 周囲のピグリン・ブルート・ゾンビピグリンを呼ぶ
         // 範囲はゾンビ版の変数を流用、または設定値に合わせて調整
-        for (Entity nearby : leadBrute.getNearbyEntities(swarmDetectionRange, commanderAuraHeight / 2, swarmDetectionRange)) {
+        for (Entity nearby : leadBrute.getNearbyEntities(swarmDetectionRange, commanderAuraHeight / 2,
+                swarmDetectionRange)) {
 
             // 判定対象：ピグリン、ピグリンブルート、ゾンビピグリン
             if (nearby instanceof Piglin || nearby instanceof PiglinBrute || nearby instanceof PigZombie) {
@@ -1271,7 +1808,8 @@ public class EnchantedMobSystem implements Listener {
                 // ピグリンらしい視覚演出（溶岩のパチパチ音や火花）
                 if (random.nextDouble() < 0.4) {
                     // LAVA（溶岩の火花）で興奮状態を表現
-                    fellow.getWorld().spawnParticle(Particle.LAVA, fellow.getLocation().add(0, 1.5, 0), 5, 0.3, 0.3, 0.3, 0.1);
+                    fellow.getWorld().spawnParticle(Particle.LAVA, fellow.getLocation().add(0, 1.5, 0), 5, 0.3, 0.3,
+                            0.3, 0.1);
                     // 豚の鼻鳴らし音
                     fellow.getWorld().playSound(fellow.getLocation(), Sound.ENTITY_PIGLIN_BRUTE_ANGRY, 1.0f, 1.2f);
                 }
@@ -1282,8 +1820,10 @@ public class EnchantedMobSystem implements Listener {
     // --- 7. クモのAI: 粘着糸 & 飛びかかり ---
     @EventHandler
     public void onSpiderAttack(EntityDamageByEntityEvent event) {
-        if (!(event.getDamager() instanceof Spider spider) || !isEnchanted(spider)) return;
-        if (!(event.getEntity() instanceof Player player)) return;
+        if (!(event.getDamager() instanceof Spider spider) || !isEnchanted(spider))
+            return;
+        if (!(event.getEntity() instanceof Player player))
+            return;
 
         // 1. 粘着糸 (Web Trap) の設置判定
         Location feet = player.getLocation().getBlock().getLocation(); // ブロック単位の座標を取得
@@ -1312,8 +1852,10 @@ public class EnchantedMobSystem implements Listener {
 
     @EventHandler
     public void onSpiderTarget(EntityTargetLivingEntityEvent event) {
-        if (!(event.getEntity() instanceof Spider spider) || !isEnchanted(spider)) return;
-        if (!(event.getTarget() instanceof Player player)) return;
+        if (!(event.getEntity() instanceof Spider spider) || !isEnchanted(spider))
+            return;
+        if (!(event.getTarget() instanceof Player player))
+            return;
 
         new BukkitRunnable() {
             @Override
@@ -1325,8 +1867,10 @@ public class EnchantedMobSystem implements Listener {
                 double dist = spider.getLocation().distance(player.getLocation());
 
                 // 飛びかかり奇襲 (間合いが設定値の時)
-                if (dist > spiderLeapMinDistance && dist < spiderLeapMaxDistance && spider.isOnGround() && random.nextDouble() < spiderLeapChance) {
-                    Vector leap = player.getLocation().toVector().subtract(spider.getLocation().toVector()).normalize().multiply(spiderLeapSpeed);
+                if (dist > spiderLeapMinDistance && dist < spiderLeapMaxDistance && spider.isOnGround()
+                        && random.nextDouble() < spiderLeapChance) {
+                    Vector leap = player.getLocation().toVector().subtract(spider.getLocation().toVector()).normalize()
+                            .multiply(spiderLeapSpeed);
                     leap.setY(0.5);
                     spider.setVelocity(leap);
                     spider.getWorld().playSound(spider.getLocation(), Sound.ENTITY_SPIDER_AMBIENT, 1f, 0.5f);
@@ -1335,14 +1879,13 @@ public class EnchantedMobSystem implements Listener {
         }.runTaskTimer(plugin, 0, 20);
     }
 
-
-
     /**
      * 周囲のクモを呼び寄せ、特定のプレイヤーを攻撃させる
      */
     private void callNearbySpidersTo(Player target, Spider attacker) {
         // 周囲のエンティティを検索
-        List<Entity> nearby = attacker.getNearbyEntities(spiderSwarmCallRange, spiderSwarmCallHeight, spiderSwarmCallRange);
+        List<Entity> nearby = attacker.getNearbyEntities(spiderSwarmCallRange, spiderSwarmCallHeight,
+                spiderSwarmCallRange);
 
         for (Entity entity : nearby) {
             // 自分以外のクモ（洞窟クモ含む）を対象にする
@@ -1358,8 +1901,7 @@ public class EnchantedMobSystem implements Listener {
                 nearbySpider.getWorld().spawnParticle(
                         Particle.ANGRY_VILLAGER,
                         nearbySpider.getLocation().add(0, 1, 0),
-                        3, 0.3, 0.3, 0.3, 0
-                );
+                        3, 0.3, 0.3, 0.3, 0);
             }
         }
     }
@@ -1376,7 +1918,8 @@ public class EnchantedMobSystem implements Listener {
                 }
 
                 // 周囲のエンティティを取得
-                List<Entity> nearby = commander.getNearbyEntities(commanderAuraRange, commanderAuraHeight, commanderAuraRange);
+                List<Entity> nearby = commander.getNearbyEntities(commanderAuraRange, commanderAuraHeight,
+                        commanderAuraRange);
                 for (Entity entity : nearby) {
                     // 対象の条件：
                     // 1. モンスターであること
@@ -1388,14 +1931,16 @@ public class EnchantedMobSystem implements Listener {
                         if (isUndead(minion) && !isEnchanted(minion)) {
 
                             // 攻撃力上昇 I (3秒)
-                            minion.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, 60, 0, false, true, true));
+                            minion.addPotionEffect(
+                                    new PotionEffect(PotionEffectType.STRENGTH, 60, 0, false, true, true));
 
                             // 移動速度上昇 I (3秒)
                             minion.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 60, 0, false, true, true));
 
                             // エフェクト（オーラを受けている演出）
                             if (random.nextDouble() < 0.2) {
-                                minion.getWorld().spawnParticle(Particle.HAPPY_VILLAGER, minion.getLocation().add(0, 1.5, 0), 3, 0.2, 0.2, 0.2, 0);
+                                minion.getWorld().spawnParticle(Particle.HAPPY_VILLAGER,
+                                        minion.getLocation().add(0, 1.5, 0), 3, 0.2, 0.2, 0.2, 0);
                             }
                         }
                     }
@@ -1404,10 +1949,49 @@ public class EnchantedMobSystem implements Listener {
         }.runTaskTimer(plugin, 0, swarmAuraInterval); // config値で周期を制御
         registerMobTask(commander, t.getTaskId());
     }
+
+    // --- 8b. スライムのバフオーラ (周囲ノーマルスライムに耐性Ⅱ + 跳躍力上昇Ⅱ) ---
+    private void startSlimeCommanderAura(Slime commander) {
+        org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (!commander.isValid() || commander.isDead()) {
+                    cancel();
+                    return;
+                }
+
+                List<Entity> nearby = commander.getNearbyEntities(
+                        slimeBuffAuraRange, slimeBuffAuraHeight, slimeBuffAuraRange);
+                for (Entity entity : nearby) {
+                    // 対象: ノーマルスライム（エンチャント済みは除外、MagmaCubeも除外）
+                    if (entity instanceof Slime minion && !(entity instanceof MagmaCube)
+                            && !minion.equals(commander) && !isEnchanted(minion)) {
+
+                        // 耐性 II (3秒)
+                        minion.addPotionEffect(
+                                new PotionEffect(PotionEffectType.RESISTANCE, 60, 1, false, true, true));
+
+                        // 跳躍力上昇 II (3秒)
+                        minion.addPotionEffect(
+                                new PotionEffect(PotionEffectType.JUMP_BOOST, 60, 1, false, true, true));
+
+                        // オーラ受領エフェクト
+                        if (random.nextDouble() < 0.2) {
+                            minion.getWorld().spawnParticle(Particle.HAPPY_VILLAGER,
+                                    minion.getLocation().add(0, 0.5, 0), 3, 0.3, 0.3, 0.3, 0);
+                        }
+                    }
+                }
+            }
+        }.runTaskTimer(plugin, 0, slimeBuffAuraInterval);
+        registerMobTask(commander, t.getTaskId());
+    }
+
     // --- 9. クリーパーの毒ガス爆発 ---
     @EventHandler
     public void onCreeperExplode(EntityExplodeEvent event) {
-        if (!(event.getEntity() instanceof Creeper creeper) || !isEnchanted(creeper)) return;
+        if (!(event.getEntity() instanceof Creeper creeper) || !isEnchanted(creeper))
+            return;
 
         Location loc = creeper.getLocation();
 
@@ -1419,21 +2003,25 @@ public class EnchantedMobSystem implements Listener {
         cloud.setWaitTime(0);
 
         // デバフ効果（鈍鈍 + 弱体化）
-        cloud.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SLOWNESS, creeperPoisonCloudDuration, 1), true);
-        cloud.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS, creeperPoisonCloudDuration, 1), true);
+        cloud.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SLOWNESS,
+                creeperPoisonCloudDuration, 1), true);
+        cloud.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WEAKNESS,
+                creeperPoisonCloudDuration, 1), true);
 
         cloud.setColor(org.bukkit.Color.PURPLE); // 禍々しい紫色
         creeper.getWorld().playSound(loc, Sound.ENTITY_DRAGON_FIREBALL_EXPLODE, 1f, 0.5f);
     }
 
-
     @EventHandler
     public void onZombieLowHP(EntityDamageEvent event) {
         // Zombie(ハスク等含む) または PigZombie(ゾンビピグリン) を対象にする
-        if (!(event.getEntity() instanceof Monster monster) || !isEnchanted(monster)) return;
-        if (!(monster instanceof Zombie || monster instanceof PigZombie)) return;
+        if (!(event.getEntity() instanceof Monster monster) || !isEnchanted(monster))
+            return;
+        if (!(monster instanceof Zombie || monster instanceof PigZombie))
+            return;
 
-        if (monster.getPersistentDataContainer().has(reinforcedKey, PersistentDataType.BYTE)) return;
+        if (monster.getPersistentDataContainer().has(reinforcedKey, PersistentDataType.BYTE))
+            return;
 
         // 体力判定
         if (monster.getHealth() - event.getFinalDamage() <= reinforcementHpThreshold) {
@@ -1475,7 +2063,8 @@ public class EnchantedMobSystem implements Listener {
         // 【重要修正】leader.getClass() ではなく EntityClass を取得する
         // これにより CraftPigZombie ではなく PigZombie.class が正しく渡されます
         Class<? extends Entity> entityClass = leader.getType().getEntityClass();
-        if (entityClass == null) return; // 万が一取得できない場合の安全策
+        if (entityClass == null)
+            return; // 万が一取得できない場合の安全策
 
         leader.getWorld().spawn(spawnLoc, (Class<? extends Monster>) entityClass, fellow -> {
             fellow.getPersistentDataContainer().set(enchantedKey, PersistentDataType.BYTE, (byte) 0);
@@ -1512,7 +2101,8 @@ public class EnchantedMobSystem implements Listener {
 
     // ヘルパーメソッド：名前を綺麗にする用（例：PIG_ZOMBIE -> Pig zombie）
     private String capitalize(String str) {
-        if (str == null || str.isEmpty()) return str;
+        if (str == null || str.isEmpty())
+            return str;
         return str.substring(0, 1).toUpperCase() + str.substring(1);
     }
 
@@ -1541,12 +2131,14 @@ public class EnchantedMobSystem implements Listener {
                 }
 
                 LivingEntity target = monster.getTarget();
-                if (target == null) return;
+                if (target == null)
+                    return;
 
                 Location mLoc = monster.getLocation();
                 Location tLoc = target.getLocation();
 
-                double distH = Math.sqrt(Math.pow(mLoc.getX() - tLoc.getX(), 2) + Math.pow(mLoc.getZ() - tLoc.getZ(), 2));
+                double distH = Math
+                        .sqrt(Math.pow(mLoc.getX() - tLoc.getX(), 2) + Math.pow(mLoc.getZ() - tLoc.getZ(), 2));
                 double diffY = tLoc.getY() - mLoc.getY();
 
                 // 1. スタック検知
@@ -1588,7 +2180,8 @@ public class EnchantedMobSystem implements Listener {
                 if (occupier != null && !occupier.equals(monster.getUniqueId())) {
                     Entity other = Bukkit.getEntity(occupier);
                     if (other != null && other.isValid() && other.getLocation().distance(mLoc) < 1.0) {
-                        Vector escape = mLoc.toVector().subtract(other.getLocation().toVector()).setY(0).normalize().multiply(0.2);
+                        Vector escape = mLoc.toVector().subtract(other.getLocation().toVector()).setY(0).normalize()
+                                .multiply(0.2);
                         monster.setVelocity(monster.getVelocity().add(escape));
                         return;
                     } else {
@@ -1603,7 +2196,8 @@ public class EnchantedMobSystem implements Listener {
                 Location probe1 = mLoc.clone().add(dir.clone().multiply(0.8));
                 Location probe2 = mLoc.clone().add(dir.clone().multiply(lookaheadDistance));
 
-                if (diffY > verticalBuildCloseDistance && (probe1.getBlock().getType().isSolid() || probe2.getBlock().getType().isSolid())) {
+                if (diffY > verticalBuildCloseDistance
+                        && (probe1.getBlock().getType().isSolid() || probe2.getBlock().getType().isSolid())) {
                     org.bukkit.block.Block stepBase = mLoc.getBlock();
                     if (stepBase.getType() == Material.AIR) {
                         refreshTemporaryBlock(monster, stepBase.getLocation());
@@ -1613,7 +2207,8 @@ public class EnchantedMobSystem implements Listener {
                 }
 
                 // B: 【垂直縦積み】壁が高い、または密着・スタック時
-                if ((diffY >= verticalBuildHeight && distH <= 2.0) || (distH <= verticalBuildCloseDistance || stuckTicks > stuckTickLimit)) {
+                if ((diffY >= verticalBuildHeight && distH <= 2.0)
+                        || (distH <= verticalBuildCloseDistance || stuckTicks > stuckTickLimit)) {
                     org.bukkit.block.Block feet = mLoc.getBlock();
                     // 足元が空気かつ、下が土台ブロックであること
                     if (feet.getType() == Material.AIR && mLoc.getBlock().getRelative(0, -1, 0).getType().isSolid()) {
@@ -1668,6 +2263,7 @@ public class EnchantedMobSystem implements Listener {
 
         // まだ全体タイマーが動いていない場合は、別途管理タスクを1つだけ回す（コンストラクタ等で1回起動するのが理想）
     }
+
     public void startGlobalBlockDamageTask() {
         new BukkitRunnable() {
             @Override
@@ -1697,7 +2293,8 @@ public class EnchantedMobSystem implements Listener {
                     if (stage >= 10) {
                         // 破壊処理
                         block.setType(Material.AIR);
-                        block.getWorld().spawnParticle(Particle.BLOCK, loc.clone().add(0.5, 0.5, 0.5), 15, 0.2, 0.2, 0.2, originalType.createBlockData());
+                        block.getWorld().spawnParticle(Particle.BLOCK, loc.clone().add(0.5, 0.5, 0.5), 15, 0.2, 0.2,
+                                0.2, originalType.createBlockData());
                         block.getWorld().playSound(loc, Sound.BLOCK_STONE_BREAK, 1.0f, 1.2f);
 
                         clearDamageAt(loc);
@@ -1728,7 +2325,8 @@ public class EnchantedMobSystem implements Listener {
                 Bukkit.getScheduler().cancelTask(activeBlocks.get(loc));
                 activeBlocks.remove(loc);
                 // ひびのパケットをリセット
-                event.getBlock().getWorld().getPlayers().forEach(p -> p.sendBlockDamage(event.getBlock().getLocation(), 0.0f));
+                event.getBlock().getWorld().getPlayers()
+                        .forEach(p -> p.sendBlockDamage(event.getBlock().getLocation(), 0.0f));
             }
         }
     }
@@ -1768,7 +2366,8 @@ public class EnchantedMobSystem implements Listener {
 
                 // 2. 周囲に良い装備がないか探す（既にターゲットがある場合はスキップして節約）
                 if (targetItem == null) {
-                    for (Entity e : monster.getNearbyEntities(equipmentDetectionRange, equipmentDetectionRange / 2, equipmentDetectionRange)) {
+                    for (Entity e : monster.getNearbyEntities(equipmentDetectionRange, equipmentDetectionRange / 2,
+                            equipmentDetectionRange)) {
                         if (e instanceof Item item && isEquipment(item.getItemStack().getType())) {
                             targetItem = item;
                             break;
@@ -1807,7 +2406,8 @@ public class EnchantedMobSystem implements Listener {
 
                 // 2. 周囲に良い装備がないか探す（既にターゲットがある場合はスキップして節約）
                 if (targetItem == null) {
-                    for (Entity e : monster.getNearbyEntities(equipmentDetectionRange, equipmentDetectionRange / 2, equipmentDetectionRange)) {
+                    for (Entity e : monster.getNearbyEntities(equipmentDetectionRange, equipmentDetectionRange / 2,
+                            equipmentDetectionRange)) {
                         if (e instanceof Item item && isEquipment(item.getItemStack().getType())) {
                             targetItem = item;
                             break;
@@ -1859,7 +2459,8 @@ public class EnchantedMobSystem implements Listener {
                 }
 
                 LivingEntity target = creeper.getTarget();
-                if (target == null) return;
+                if (target == null)
+                    return;
 
                 Location cLoc = creeper.getLocation();
                 Location tLoc = target.getLocation();
@@ -1899,6 +2500,7 @@ public class EnchantedMobSystem implements Listener {
             }
         }.runTaskTimer(plugin, 0, 2); // 判定精度を上げて接触検知を確実にする
     }
+
     // EnchantedMobSystemクラス内に追加するメソッド
     public void cleanup() {
         // 残っている一時ブロックを全て消去
@@ -1919,11 +2521,20 @@ public class EnchantedMobSystem implements Listener {
             campfireTask = null;
         }
 
-        // 全モブの登録タスクをキャンセル
-        for (java.util.UUID uid : new java.util.ArrayList<>(mobTasks.keySet())) {
-            java.util.List<Integer> ids = mobTasks.remove(uid);
-            if (ids != null) ids.forEach(id -> Bukkit.getScheduler().cancelTask(id));
+        // 全モブの登録タスクを効率的にキャンセル
+        java.util.Collection<java.util.List<Integer>> allTaskIds = mobTasks.values();
+        for (java.util.List<Integer> ids : allTaskIds) {
+            if (ids != null) {
+                for (Integer id : ids) {
+                    try {
+                        Bukkit.getScheduler().cancelTask(id);
+                    } catch (Exception e) {
+                        debugLog("タスクキャンセル失敗: " + e.getMessage());
+                    }
+                }
+            }
         }
+        mobTasks.clear();
 
         cleanup();
         org.bukkit.event.HandlerList.unregisterAll(this);
@@ -1931,9 +2542,11 @@ public class EnchantedMobSystem implements Listener {
 
     public void enable() {
         plugin.getServer().getPluginManager().registerEvents(this, plugin);
-        if (campfireTask == null) startCampfireHealingTask();
+        if (campfireTask == null)
+            startCampfireHealingTask();
         rescheduleAllEnchantedMobs();
     }
+
     // コンストラクタに追加、または初期化時に呼び出し
     public void startCampfireHealingTask() {
         campfireTask = new BukkitRunnable() {
@@ -1952,7 +2565,8 @@ public class EnchantedMobSystem implements Listener {
 
                                 // 焚き火（火がついているもの）を発見
                                 if (block.getType() == Material.CAMPFIRE || block.getType() == Material.SOUL_CAMPFIRE) {
-                                    org.bukkit.block.data.type.Campfire data = (org.bukkit.block.data.type.Campfire) block.getBlockData();
+                                    org.bukkit.block.data.type.Campfire data = (org.bukkit.block.data.type.Campfire) block
+                                            .getBlockData();
                                     if (data.isLit()) {
                                         applyCampfireHeal(block.getLocation());
                                     }
@@ -1970,7 +2584,8 @@ public class EnchantedMobSystem implements Listener {
         double healAmount = campfireHealAmount;
 
         // 焚き火の周囲のエンティティを確認
-        for (Entity entity : fireLoc.getWorld().getNearbyEntities(fireLoc, campfireScanRange, campfireScanHeight, campfireScanRange)) {
+        for (Entity entity : fireLoc.getWorld().getNearbyEntities(fireLoc, campfireScanRange, campfireScanHeight,
+                campfireScanRange)) {
             // プレイヤーのみを対象にする
             if (entity instanceof Player player) {
                 // サバイバルまたはアドベンチャーモードのプレイヤーのみ対象
@@ -1988,9 +2603,9 @@ public class EnchantedMobSystem implements Listener {
                         player.getWorld().spawnParticle(
                                 Particle.HAPPY_VILLAGER,
                                 player.getLocation().add(0, 1.2, 0),
-                                10,           // 粒の数
+                                10, // 粒の数
                                 0.3, 0.5, 0.35, // 広がり
-                                0.35           // 速度
+                                0.35 // 速度
                         );
 
                         // 統一された回復音（必要に応じて追加）
@@ -2000,6 +2615,231 @@ public class EnchantedMobSystem implements Listener {
             }
         }
     }
+
+    /**
+     * スライム・マグマキューブの成長AI（汎用版）
+     * 一定時間ごとにサイズを1段階増加させる
+     */
+    private <T extends LivingEntity> void startGrowthAI(T mob, double growthInterval, int maxSize) {
+        debugLog("startGrowthAI 開始: mobType=" + mob.getClass().getSimpleName() + ", growthInterval=" + growthInterval
+                + ", maxSize=" + maxSize);
+        org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
+            int growthCounter = 0;
+
+            @Override
+            public void run() {
+                if (!mob.isValid() || mob.isDead()) {
+                    debugLog("Growth AI キャンセル（モブが無効または死亡）");
+                    cancel();
+                    return;
+                }
+
+                growthCounter++;
+
+                // カウンターが成長間隔に達したかチェック
+                if (growthCounter >= (int) growthInterval) {
+                    growthCounter = 0;
+                    debugLog("成長処理実行");
+
+                    // サイズを1増加（最大値までチェック）
+                    if (mob instanceof Slime slime) {
+                        int currentSize = slime.getSize();
+                        if (currentSize < maxSize) {
+                            slime.setSize(currentSize + 1);
+                            debugLog("Slime サイズ増加: " + currentSize + " → " + (currentSize + 1));
+                            // 成長時のパーティクルエフェクト
+                            slime.getWorld().spawnParticle(
+                                    org.bukkit.Particle.HAPPY_VILLAGER,
+                                    slime.getLocation(),
+                                    10, 0.5, 0.5, 0.5, 0.1);
+                        } else {
+                            debugLog("Slime は既に最大サイズです");
+                        }
+                    } else if (mob instanceof MagmaCube magma) {
+                        int currentSize = magma.getSize();
+                        if (currentSize < maxSize) {
+                            magma.setSize(currentSize + 1);
+                            debugLog("MagmaCube サイズ増加: " + currentSize + " → " + (currentSize + 1));
+                            // マグマキューブは炎パーティクルを使用
+                            magma.getWorld().spawnParticle(
+                                    org.bukkit.Particle.FLAME,
+                                    magma.getLocation(),
+                                    10, 0.5, 0.5, 0.5, 0.1);
+                        } else {
+                            debugLog("MagmaCube は既に最大サイズです");
+                        }
+                    } else {
+                        debugLog("entity は Slime/MagmaCube ではありません");
+                    }
+                }
+            }
+        }.runTaskTimer(plugin, 0, 10); // 10ティックごとに実行
+
+        if (mob instanceof Mob m)
+            registerMobTask(m, t.getTaskId());
+    }
+
+    /**
+     * スライム・マグマキューブの地鳴らしジャンプAI（汎用版）
+     * 大きなジャンプでプレイヤーを吹き飛ばす
+     */
+    private <T extends LivingEntity> void startEarthquakeJumpAI(T mob, double jumpPower, double knockbackForce,
+            int cooldown) {
+        debugLog("startEarthquakeJumpAI 開始: mobType=" + mob.getClass().getSimpleName() + ", jumpPower=" + jumpPower
+                + ", knockbackForce=" + knockbackForce + ", cooldown=" + cooldown);
+        org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
+            int cooldownCounter = 0;
+
+            @Override
+            public void run() {
+                if (!mob.isValid() || mob.isDead()) {
+                    cancel();
+                    return;
+                }
+
+                // クールダウン管理
+                if (cooldownCounter > 0) {
+                    cooldownCounter--;
+                    return;
+                }
+
+                // Mob のみが getTarget() を持つ
+                if (!(mob instanceof Mob m)) {
+                    debugLog("Mob ではないため getTarget() スキップ");
+                    return;
+                }
+
+                LivingEntity target = m.getTarget();
+                if (target != null && target instanceof Player player && target.isValid()) {
+                    double distance = mob.getLocation().distance(player.getLocation());
+                    debugLog("ターゲットプレイヤー検出. 距離=" + distance);
+                    if (distance < 8.0) { // 8ブロック以内でジャンプ
+                        debugLog("地鳴らしジャンプ発動!");
+
+                        // サイズの値を取得（1-4）
+                        double sizeMultiplier = 1.0;
+                        int actualSize = 1;
+                        if (mob instanceof Slime slime) {
+                            actualSize = slime.getSize();
+                            sizeMultiplier = actualSize / 1.0;
+                        } else if (mob instanceof MagmaCube magma) {
+                            actualSize = magma.getSize();
+                            sizeMultiplier = actualSize / 1.0;
+                        }
+                        // エフェクト半径をサイズに応じた値に（r = 1, 2, 3, 4）
+                        double effectRadius = sizeMultiplier;
+
+                        // ジャンプ時のメイステイスような演出（重い着地効果）
+                        Location mobLoc = mob.getLocation();
+                        Location playerLoc = player.getLocation();
+
+                        // サイズに応じた爆発パーティクル数のスケーリング（追加でさらに50%ナーフ → 合計25%）
+                        int explosionEmitterCount = Math.max(1, (int) Math.round(5 * sizeMultiplier * 0.25));
+                        int explosionCount = Math.max(1, (int) Math.round(3 * sizeMultiplier * 0.25));
+
+                        // モブ発生地点のエフェクト（エフェクト半径をサイズに応じた値に）
+                        mob.getWorld().spawnParticle(
+                                org.bukkit.Particle.EXPLOSION_EMITTER,
+                                mobLoc,
+                                explosionEmitterCount, effectRadius, 0.5 * effectRadius, effectRadius, 0.0);
+                        mob.getWorld().spawnParticle(
+                                org.bukkit.Particle.EXPLOSION,
+                                mobLoc,
+                                explosionCount, effectRadius, effectRadius, effectRadius, 0.05);
+
+                        // 追加のスモークパーティクル（エフェクト半径適用）
+                        mob.getWorld().spawnParticle(
+                                org.bukkit.Particle.SMOKE,
+                                mobLoc,
+                                Math.max(1, (int) Math.round(5 * sizeMultiplier * 0.25)), effectRadius, effectRadius,
+                                effectRadius, 0.1);
+
+                        // 音量もサイズに応じてスケーリング（さらに50%ナーフ）
+                        float soundVolume = (float) Math.min(1.125, 1.0f + (0.03125f * sizeMultiplier));
+                        float soundPitch = (float) (0.8 - (0.0125f * sizeMultiplier)); // サイズが大きいほど低い音
+                        mob.getWorld().playSound(
+                                mobLoc,
+                                org.bukkit.Sound.ENTITY_GENERIC_EXPLODE,
+                                soundVolume, soundPitch);
+                        mob.getWorld().playSound(
+                                mobLoc,
+                                org.bukkit.Sound.ENTITY_LIGHTNING_BOLT_IMPACT,
+                                soundVolume * 0.5f, soundPitch);
+
+                        // プレイヤーがジャンプされた時点でのエフェクト（スライム/マグマ付近のみ）
+                        new BukkitRunnable() {
+                            @Override
+                            public void run() {
+                                if (!mob.isValid()) {
+                                    cancel();
+                                    return;
+                                }
+                                Location mobLoc = mob.getLocation();
+
+                                // サイズに応じた着地エフェクト
+                                double sizeMultiplier = 1.0;
+                                if (mob instanceof Slime slime) {
+                                    sizeMultiplier = slime.getSize() / 1.0;
+                                } else if (mob instanceof MagmaCube magma) {
+                                    sizeMultiplier = magma.getSize() / 1.0;
+                                }
+
+                                // 着地エフェクト半径もサイズに応じた値に
+                                int landingExplosionCount = Math.max(1, (int) Math.round(3 * sizeMultiplier * 0.25));
+
+                                // 着地時のエフェクト（さらに50%ナーフ、エフェクト半径適用）
+                                mob.getWorld().spawnParticle(
+                                        org.bukkit.Particle.EXPLOSION_EMITTER,
+                                        mobLoc,
+                                        landingExplosionCount, effectRadius, effectRadius, effectRadius, 0.0);
+                                mob.getWorld().spawnParticle(
+                                        org.bukkit.Particle.SMOKE,
+                                        mobLoc,
+                                        Math.max(1, (int) Math.round(2 * sizeMultiplier * 0.25)), effectRadius,
+                                        effectRadius, effectRadius, 0.05);
+
+                                float landingVolume = (float) Math.min(1.075, 0.8f + (0.046875f * sizeMultiplier));
+                                float landingPitch = (float) (0.8 - (0.0125f * sizeMultiplier));
+                                mob.getWorld().playSound(
+                                        mobLoc,
+                                        org.bukkit.Sound.BLOCK_ANVIL_LAND,
+                                        landingVolume, landingPitch);
+                                mob.getWorld().playSound(
+                                        mobLoc,
+                                        org.bukkit.Sound.BLOCK_ANVIL_HIT,
+                                        landingVolume * 0.7f, landingPitch);
+                            }
+                        }.runTaskLater(plugin, 10); // 0.5秒後に着地エフェクト
+
+                        // 爆風ジャンプ高さ：サイズ1-4で 5-20ブロック（5ブロック刻み）
+                        // Minecraft では高さ h に対する Y速度は v = sqrt(2 * 0.08 * h)
+                        double jumpHeight = 5.0 * actualSize; // サイズ: 5, 10, 15, 20 ブロック
+                        double jumpVelocity = Math.sqrt(jumpHeight * 0.08);
+                        mob.setVelocity(new org.bukkit.util.Vector(0, jumpVelocity, 0));
+
+                        // プレイヤーを吹き飛ばす（さらにナーフ）
+                        Vector direction = player.getLocation().toVector().subtract(mob.getLocation().toVector())
+                                .normalize();
+                        Vector knockback = direction.multiply(knockbackForce * sizeMultiplier)
+                                .setY(0.1 * (sizeMultiplier));
+                        player.setVelocity(knockback);
+
+                        // ダメージはなし、吹き飛ばしエフェクトのみ
+                        player.getWorld().spawnParticle(
+                                org.bukkit.Particle.CLOUD,
+                                player.getLocation(),
+                                5, 0.5, 0.5, 0.5, 0.1);
+
+                        cooldownCounter = cooldown;
+                    }
+                }
+            }
+        }.runTaskTimer(plugin, 0, 20); // 20ティックごとに判定
+
+        if (mob instanceof Mob m)
+            registerMobTask(m, t.getTaskId());
+    }
+
     private void startBruteCommanderAI(PiglinBrute brute) {
         org.bukkit.scheduler.BukkitTask t = new BukkitRunnable() {
             @Override
@@ -2023,5 +2863,31 @@ public class EnchantedMobSystem implements Listener {
         registerMobTask(brute, t.getTaskId());
     }
 
-}
+    /**
+     * エンチャント化されたスライム・マグマキューブの落下ダメージ無効化
+     */
+    @EventHandler
+    public void onEnchantedSlimeFallDamage(EntityDamageEvent event) {
+        // Entity を LivingEntity にキャスト
+        if (!(event.getEntity() instanceof LivingEntity entity)) {
+            return;
+        }
 
+        // エンチャント化されたスライムまたはマグマキューブのみ
+        if (!(entity instanceof Slime || entity instanceof MagmaCube)) {
+            return;
+        }
+
+        // エンチャント化されているか確認
+        if (!isEnchanted(entity)) {
+            return;
+        }
+
+        // 落下ダメージのみを無効化
+        if (event.getCause() == EntityDamageEvent.DamageCause.FALL) {
+            event.setCancelled(true);
+            debugLog("エンチャント化スライムの落下ダメージを無効化");
+        }
+    }
+
+}
