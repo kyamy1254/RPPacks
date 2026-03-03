@@ -4,6 +4,17 @@
 # このファイルを編集して /rpp reload でプラグインをリロードしてください
 # 各機能の有効化・無効化や動作パラメータを設定します
 
+# バージョン管理（新規設定項目の自動追加に使用）
+# このバージョンを更新しないでください
+config-version: 6
+
+# ================================================================
+# グローバル設定
+# ================================================================
+
+# デバッグモード（コンソールに詳細なDEBUGメッセージを出力）
+debug-mode: false
+
 # ================================================================
 # セクション 1: プレイヤー機能（共通設定）
 # ================================================================
@@ -166,6 +177,37 @@ enchanted-mobs:
   
   # ===== 基本設定 =====
   enchanted-spawn-chance: 0.15   # スポーン時にEnchanted化する確率 (0.0 ~ 1.0)
+
+  # エンチャント化を許可するエンティティのリスト（ボスはデフォルトで含めない）
+  # 大文字/小文字は無視されます。スペースやハイフンはアンダースコアに変換されます。
+  # 例: magma_cube, slime, zombie, skeleton, creeper, spider, piglin
+  allowed-types:
+    - BOGGED
+    - BREEZE
+    - CREAKING
+    - DROWNED
+    - ENDERMAN
+    - EVOKER
+    - GHAST
+    - HOGLIN
+    - HUSK
+    - MAGMA_CUBE
+    - PHANTOM
+    - PILLAGER
+    - RAVAGER
+    - SHULKER
+    - SILVERFISH
+    - SKELETON
+    - SLIME
+    - SPIDER
+    - STRAY
+    - VINDICATOR
+    - WITCH
+    - WITHER_SKELETON
+    - ZOGLIN
+    - ZOMBIE
+    - ZOMBIE_VILLAGER
+    - ZOMBIE_PIGMAN
   
   # ===== ステータス調整 =====
   stats:
@@ -237,6 +279,30 @@ enchanted-mobs:
     swarm-call-range: 20          # 周辺スパイダー呼び出し範囲
     swarm-call-height: 10         # 周辺スパイダー呼び出し高さ
   
+  # ===== スライム成長 & 吹き飛ばし =====
+  slime:
+    growth-interval: 30           # サイズ成長間隔（ティック）（ 1.5秒ごとに成長）
+    max-size: 4                   # 最大サイズ（バニラ最大: 4）
+    earthquake-jump-power: 0.8    # ジャンプ力
+    earthquake-knockback-force: 1.5  # プレイヤー吹き飛ばし距離
+    earthquake-cooldown: 80       # クールダウン（ティック）（デフォルト: 4秒）
+    enchanted-spawn-chance: 0.05  # エンチャントスライムのスポーン確率
+    max-per-server: 5             # サーバーごとのエンチャントスライム最大数
+    # バフオーラ: 周囲のノーマルスライムに耐性Ⅱ + 跳躍力上昇Ⅱを付与
+    buff-aura-range: 16           # バフオーラの範囲（ブロック）
+    buff-aura-height: 8           # バフオーラの高さ（ブロック）
+    buff-aura-interval: 40        # バフオーラの周期（ティック）
+  
+  # ===== マグマキューブ成長 & 吹き飛ばし（スライムより弱体化） =====
+  magma-cube:
+    growth-interval: 60           # サイズ成長間隔（ティック）（ 3秒ごとに成長）（スライムより遅い）
+    max-size: 3                   # 最大サイズ（スライムより1段階小さい）
+    earthquake-jump-power: 0.5    # 吹き飛ばし力（スライムの0.625倍）
+    earthquake-knockback-force: 1.0  # プレイヤー吹き飛ばし距離（スライムの0.67倍）
+    earthquake-cooldown: 120      # クールダウン（ティック）（スライムの1.5倍長い）
+    enchanted-spawn-chance: 0.05  # エンチャントマグマキューブのスポーン確率
+    max-per-server: 5             # サーバーごとのエンチャントマグマキューブ最大数
+  
   # ===== クリーパー毒ガス爆発 =====
   creeper-poison:
     cloud-radius: 4.0             # 毒ガス雲の初期半径
@@ -262,10 +328,10 @@ enchanted-mobs:
   
   # ===== キャンプファイア回復 =====
   campfire-healing:
-    heal-amount: 2.0              # 回復量（ハート値）
+    heal-amount: 1.0              # 回復量（ハート値）
     scan-range: 5                 # スキャン範囲（ブロック）
     scan-height: 3                # スキャン高さ
-    task-interval: 40             # タスク周期（ティック）
+    task-interval: 20             # タスク周期（ティック）
 
 # ================================================================
 # セクション 3: 拡張機能（プレイヤー/エンティティ）
@@ -273,20 +339,18 @@ enchanted-mobs:
 
 # --- ダメージ・回復インジケーター (Damage Indicator) ---
 # 説明: ダメージ・回復を与えた攻撃対象に表示します
-damage-indicator:
-  share-continuous-damage:
-    range: 16.0                  # 共有表示範囲（ブロック）
-
-# --- HP ゲージ（アクションバー） (Health Bar) ---
-# 説明: ターゲット中のモブの体力をアクションバーに表示します
-health-bar:
-  view-distance: 96.0            # 視線判定（RayTrace）でモブを認識する距離（ブロック）
-  display-ticks: 15             # 攻撃後にゲージを維持する時間（ティック）、15 = 0.75秒
-
-# --- エンティティヘルスシステム統合フラグ ---
-# 説明: ダメージインジケーター＆HPゲージ機能全体を管理します
-# コマンド: /rpp entityhealth <enable|disable>
-features:
-  entity-health:
+# --- エンティティヘルスシステム (Entity Health System) ---
+# 説明: ダメージ・回復インジケーターとHP（ヘルスバー）を統合管理します
+entity-health:
+  # ===== ダメージ・回復インジケーター =====
+  damage-indicator:
     enabled: true
+    share-continuous-damage:
+      range: 16.0                  # 共有表示範囲（ブロック）
+
+  # ===== HP ゲージ（アクションバー） =====
+  health-bar:
+    enabled: true
+    view-distance: 96.0            # 視線判定（RayTrace）でモブを認識する距離（ブロック）
+    display-ticks: 15             # 攻撃後にゲージを維持する時間（ティック）、15 = 0.75秒
 
