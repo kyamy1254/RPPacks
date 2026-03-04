@@ -24,22 +24,27 @@ public class MenuListener implements Listener {
 
         // lang.yml の設定に基づいたタイトル判定
         String configTitleBase = ChatColor.stripColor(plugin.getRawMessage("trail-menu-title").split("\\[")[0]);
-        if (!strippedTitle.contains(configTitleBase)) return;
+        if (!strippedTitle.contains(configTitleBase))
+            return;
 
         event.setCancelled(true);
-        if (!(event.getWhoClicked() instanceof Player p)) return;
+        if (!(event.getWhoClicked() instanceof Player p))
+            return;
 
         ItemStack clicked = event.getCurrentItem();
-        if (clicked == null || clicked.getType() == Material.AIR) return;
+        if (clicked == null || clicked.getType() == Material.AIR)
+            return;
 
         ItemMeta meta = clicked.getItemMeta();
-        if (meta == null) return;
+        if (meta == null)
+            return;
 
         Material type = clicked.getType();
         String plainName = ChatColor.stripColor(meta.getDisplayName());
 
         // 装飾アイテムの無視
-        if (type == Material.GRAY_STAINED_GLASS_PANE || type == Material.CYAN_STAINED_GLASS_PANE || type == Material.PLAYER_HEAD)
+        if (type == Material.GRAY_STAINED_GLASS_PANE || type == Material.CYAN_STAINED_GLASS_PANE
+                || type == Material.PLAYER_HEAD)
             return;
 
         // ページ切り替え
@@ -49,10 +54,11 @@ public class MenuListener implements Listener {
         }
 
         // 解除
-        if (type == Material.BARRIER || plainName.equals(ChatColor.stripColor(plugin.getRawMessage("remove-effect-button")))) {
+        if (type == Material.BARRIER
+                || plainName.equals(ChatColor.stripColor(plugin.getRawMessage("remove-effect-button")))) {
             plugin.setPlayerEffect(p.getUniqueId(), null);
             p.sendMessage(plugin.getMessage("trail-remove"));
-            playConfigSound(p, "select");
+            playConfigSound(p, "effect-off");
             p.closeInventory();
             return;
         }
@@ -66,13 +72,13 @@ public class MenuListener implements Listener {
         // VIP権限チェック
         if (plugin.getVipTrails().contains(effectName.toUpperCase()) && !p.hasPermission("rppacks.vip")) {
             p.sendMessage(plugin.getMessage("trail-vip-required"));
-            playConfigSound(p, "error");
+            playConfigSound(p, "equip-fail");
             return;
         }
 
         plugin.setPlayerEffect(p.getUniqueId(), effectName);
         p.sendMessage(plugin.getMessage("trail-equip").replace("{effect}", effectName));
-        playConfigSound(p, "select");
+        playConfigSound(p, "equip-success");
         p.closeInventory();
     }
 
@@ -103,14 +109,18 @@ public class MenuListener implements Listener {
 
     private void playConfigSound(Player p, String key) {
         try {
-            org.bukkit.configuration.ConfigurationSection section = plugin.getConfig().getConfigurationSection("sounds.gui." + key);
-            if (section == null) return;
+            org.bukkit.configuration.ConfigurationSection section = plugin.getConfig()
+                    .getConfigurationSection("sounds.gui." + key);
+            if (section == null)
+                return;
             String soundName = section.getString("name");
-            if (soundName == null) return;
+            if (soundName == null)
+                return;
 
             Sound sound = Registry.SOUND_EVENT.get(NamespacedKey.minecraft(soundName.toLowerCase()));
             if (sound != null) {
-                p.playSound(p.getLocation(), sound, (float) section.getDouble("volume", 1.0), (float) section.getDouble("pitch", 1.0));
+                p.playSound(p.getLocation(), sound, (float) section.getDouble("volume", 1.0),
+                        (float) section.getDouble("pitch", 1.0));
             }
         } catch (Exception ignored) {
         }

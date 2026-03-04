@@ -12,6 +12,11 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
+import net.akabox.rascraft.economy.NetShopGUI;
+import net.akabox.rascraft.economy.NetShopManager;
+import net.akabox.rascraft.economy.VaultManager;
+import net.akabox.rascraft.command.NetShopCommand;
+
 public class RascraftPluginPacks extends JavaPlugin {
 
     private final Map<Material, GrowType> growableMap = new EnumMap<>(Material.class);
@@ -38,6 +43,10 @@ public class RascraftPluginPacks extends JavaPlugin {
     private EntityHealthSystem entityHealthSystem;
     private boolean enchantedMobsEnabled;
     private boolean entityHealthEnabled;
+
+    private VaultManager vaultManager;
+    private NetShopManager netShopManager;
+    private NetShopGUI netShopGUI;
 
     @Override
     public void onEnable() {
@@ -80,6 +89,19 @@ public class RascraftPluginPacks extends JavaPlugin {
         RasPluginCommand cmd = new RasPluginCommand(this);
         getCommand("rppacks").setExecutor(cmd);
         getCommand("rppacks").setTabCompleter(cmd);
+
+        // ネットショップと経済システムの初期化
+        this.vaultManager = new VaultManager();
+        if (!this.vaultManager.setupEconomy(this)) {
+            getLogger().severe("Vault is missing or no economy plugin is installed! NetShop feature will be disabled.");
+            this.vaultManager = null;
+        } else {
+            this.netShopManager = new NetShopManager(this);
+            this.netShopGUI = new NetShopGUI(this);
+            NetShopCommand nsCmd = new NetShopCommand(this);
+            getCommand("netshop").setExecutor(nsCmd);
+            getCommand("netshop").setTabCompleter(nsCmd);
+        }
     }
 
     @Override
@@ -91,6 +113,10 @@ public class RascraftPluginPacks extends JavaPlugin {
         }
         if (this.entityHealthSystem != null) {
             this.entityHealthSystem.disable();
+        }
+
+        if (this.netShopManager != null) {
+            this.netShopManager.saveItems();
         }
 
         // プレイヤーデータの保存
@@ -120,7 +146,8 @@ public class RascraftPluginPacks extends JavaPlugin {
 
     public void loadConfiguration() {
         reloadConfig();
-        if (langFile == null) langFile = new File(getDataFolder(), "lang.yml");
+        if (langFile == null)
+            langFile = new File(getDataFolder(), "lang.yml");
         langConfig = YamlConfiguration.loadConfiguration(langFile);
 
         FileConfiguration config = getConfig();
@@ -163,16 +190,19 @@ public class RascraftPluginPacks extends JavaPlugin {
             for (String key : colorSection.getKeys(false)) {
                 try {
                     String pStr = config.getString("footprint-trail.colored-effects." + key + ".particle");
-                    if (pStr == null) continue;
+                    if (pStr == null)
+                        continue;
                     Particle p = Particle.valueOf(pStr.toUpperCase());
                     String hex = config.getString("footprint-trail.colored-effects." + key + ".color", "#FFFFFF");
                     java.awt.Color awtColor = java.awt.Color.decode(hex);
-                    org.bukkit.Color bukkitColor = org.bukkit.Color.fromRGB(awtColor.getRed(), awtColor.getGreen(), awtColor.getBlue());
+                    org.bukkit.Color bukkitColor = org.bukkit.Color.fromRGB(awtColor.getRed(), awtColor.getGreen(),
+                            awtColor.getBlue());
                     float size = (float) config.getDouble("footprint-trail.colored-effects." + key + ".size", 1.0);
                     double note = config.getDouble("footprint-trail.colored-effects." + key + ".note-color", 0.0);
                     coloredEffectMap.put(key.toUpperCase(), new ColoredParticleData(p, bukkitColor, size, note));
                     if (config.contains("footprint-trail.colored-effects." + key + ".density")) {
-                        effectDensityMap.put(key.toUpperCase(), config.getInt("footprint-trail.colored-effects." + key + ".density"));
+                        effectDensityMap.put(key.toUpperCase(),
+                                config.getInt("footprint-trail.colored-effects." + key + ".density"));
                     }
                 } catch (Exception ignored) {
                 }
@@ -190,7 +220,8 @@ public class RascraftPluginPacks extends JavaPlugin {
 
     private void parseEffectList(List<String> source, List<String> target) {
         for (String entry : source) {
-            if (entry == null) continue;
+            if (entry == null)
+                continue;
             if (entry.contains(":")) {
                 String[] parts = entry.split(":");
                 String name = parts[0].toUpperCase();
@@ -226,14 +257,16 @@ public class RascraftPluginPacks extends JavaPlugin {
     }
 
     public String getMessage(String key) {
-        if (langConfig == null) return ChatColor.RED + "Lang file error.";
+        if (langConfig == null)
+            return ChatColor.RED + "Lang file error.";
         String msg = langConfig.getString(key, "&cMessage not found: " + key);
         String prefix = langConfig.getString("prefix", "&6[RPPacks] &r");
         return ChatColor.translateAlternateColorCodes('&', prefix + msg);
     }
 
     public String getRawMessage(String key) {
-        if (langConfig == null) return key;
+        if (langConfig == null)
+            return key;
         return ChatColor.translateAlternateColorCodes('&', langConfig.getString(key, key));
     }
 
@@ -250,10 +283,12 @@ public class RascraftPluginPacks extends JavaPlugin {
     }
 
     public void setEnchantedMobsEnabled(boolean enabled) {
-        if (this.enchantedMobsEnabled == enabled) return;
+        if (this.enchantedMobsEnabled == enabled)
+            return;
         this.enchantedMobsEnabled = enabled;
         if (!enabled) {
-            if (this.mobSystem != null) this.mobSystem.disable();
+            if (this.mobSystem != null)
+                this.mobSystem.disable();
         } else {
             if (this.mobSystem != null) {
                 getServer().getPluginManager().registerEvents(this.mobSystem, this);
@@ -267,10 +302,12 @@ public class RascraftPluginPacks extends JavaPlugin {
     }
 
     public void setEntityHealthEnabled(boolean enabled) {
-        if (this.entityHealthEnabled == enabled) return;
+        if (this.entityHealthEnabled == enabled)
+            return;
         this.entityHealthEnabled = enabled;
         if (!enabled) {
-            if (this.entityHealthSystem != null) this.entityHealthSystem.disable();
+            if (this.entityHealthSystem != null)
+                this.entityHealthSystem.disable();
         } else {
             if (this.entityHealthSystem != null) {
                 getServer().getPluginManager().registerEvents(this.entityHealthSystem, this);
@@ -306,8 +343,10 @@ public class RascraftPluginPacks extends JavaPlugin {
     }
 
     public void setPlayerEffect(UUID uuid, String name) {
-        if (name == null) playerSelectedEffect.remove(uuid);
-        else playerSelectedEffect.put(uuid, name.toUpperCase());
+        if (name == null)
+            playerSelectedEffect.remove(uuid);
+        else
+            playerSelectedEffect.put(uuid, name.toUpperCase());
         savePlayerData();
     }
 
@@ -378,10 +417,12 @@ public class RascraftPluginPacks extends JavaPlugin {
         createPlayerDataFile();
         createLangFile();
 
-        // Reload configuration from disk (resets enchantedMobsEnabled/entityHealthEnabled to config values)
+        // Reload configuration from disk (resets
+        // enchantedMobsEnabled/entityHealthEnabled to config values)
         loadConfiguration();
 
-        // Force reapply features according to NEW config values (not temp command state)
+        // Force reapply features according to NEW config values (not temp command
+        // state)
         // This ensures config.yml changes + /rpp reload persists the settings
         if (this.mobSystem != null) {
             this.mobSystem.disable();
@@ -407,7 +448,52 @@ public class RascraftPluginPacks extends JavaPlugin {
         return healthViewDistance;
     }
 
-    public enum GrowType {AGEABLE, STACK, BONEMEAL, NONE}
+    /**
+     * config.yml の sounds.gui. <key> から設定を読み込み、プレイヤーにサウンドを再生します。
+     */
+    public void playConfigSound(org.bukkit.entity.Player p, String key) {
+        try {
+            ConfigurationSection section = getConfig().getConfigurationSection("sounds.gui." + key);
+            if (section == null)
+                return;
+            String soundName = section.getString("name");
+            if (soundName == null)
+                return;
+
+            org.bukkit.Sound sound = org.bukkit.Registry.SOUND_EVENT
+                    .get(org.bukkit.NamespacedKey.minecraft(soundName.toLowerCase().replace(".", "_")));
+            // Registryのキー形式に合わせるための変換（Bukkit名またはMinecraft名）
+            if (sound == null) {
+                // 直接列挙型からの取得も試みる
+                try {
+                    sound = org.bukkit.Sound.valueOf(soundName.toUpperCase().replace(".", "_"));
+                } catch (Exception ignored) {
+                }
+            }
+
+            if (sound != null) {
+                p.playSound(p.getLocation(), sound, (float) section.getDouble("volume", 1.0),
+                        (float) section.getDouble("pitch", 1.0));
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    public VaultManager getVaultManager() {
+        return vaultManager;
+    }
+
+    public NetShopManager getNetShopManager() {
+        return netShopManager;
+    }
+
+    public NetShopGUI getNetShopGUI() {
+        return netShopGUI;
+    }
+
+    public enum GrowType {
+        AGEABLE, STACK, BONEMEAL, NONE
+    }
 
     public record ColoredParticleData(Particle particle, org.bukkit.Color color, float size, double noteColor) {
     }

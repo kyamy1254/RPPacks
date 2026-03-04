@@ -149,6 +149,11 @@ public class EnchantedMobSystem implements Listener {
     private final java.util.Set<java.util.UUID> activeEnchantedMagmaCubes = java.util.concurrent.ConcurrentHashMap
             .newKeySet();
 
+    // 討伐報酬
+    public double rewardXpMultiplier;
+    public double rewardDropMultiplier;
+    public int rewardLootingBonus;
+
     // デバッグモード
     public boolean debugMode = false;
 
@@ -195,6 +200,15 @@ public class EnchantedMobSystem implements Listener {
                 });
             }
         }.runTaskTimer(plugin, 100L, 100L);
+
+        // サーバー起動後、ワールドが完全にロードされてから既存エンチャントモブのAIタスクを再登録する
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                rescheduleAllEnchantedMobs();
+                debugLog("サーバー起動後のエンチャントモブ再登録完了");
+            }
+        }.runTaskLater(plugin, 1L);
     }
 
     /**
@@ -505,6 +519,18 @@ public class EnchantedMobSystem implements Listener {
             campfireTaskInterval = 40;
         }
 
+        // 討伐報酬
+        var rewardsSection = emConfig.getConfigurationSection("rewards");
+        if (rewardsSection != null) {
+            rewardXpMultiplier = rewardsSection.getDouble("xp-multiplier", 3.0);
+            rewardDropMultiplier = rewardsSection.getDouble("drop-multiplier", 2.0);
+            rewardLootingBonus = rewardsSection.getInt("looting-bonus", 2);
+        } else {
+            rewardXpMultiplier = 3.0;
+            rewardDropMultiplier = 2.0;
+            rewardLootingBonus = 2;
+        }
+
         plugin.getLogger().info("Enchanted Mobs configuration loaded successfully.");
     }
 
@@ -613,6 +639,9 @@ public class EnchantedMobSystem implements Listener {
         magmaCubeEarthquakeCooldown = 120; // スライムの1.5倍長い
         magmaCubeEnchantedSpawnChance = 0.05; // エンチャントマグマキューブ出現確率
         magmaCubeMaxPerServer = 5; // サーバーあたりの最大数
+        rewardXpMultiplier = 3.0;
+        rewardDropMultiplier = 2.0;
+        rewardLootingBonus = 2;
     }
 
     // --- 1. スポーン時にEnchanted化 ---
@@ -2315,20 +2344,121 @@ public class EnchantedMobSystem implements Listener {
 
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {
-        // 設置した一時ブロック（苔石）をプレイヤーが壊した場合
-        if (event.getBlock().getType() == Material.MOSSY_COBBLESTONE) {
-            Location loc = event.getBlock().getLocation();
+        Location loc = event.getBlock().getLocation();
+        // 建築AIが設置した一時ブロックをプレイヤーが壊した場合
+        if (temporaryBlockTypes.containsKey(loc)) {
+            // ドロップを無効にして破壊
+            event.setDropItems(false);
+            // ひびのパケットをリセット
+            clearDamageAt(loc);
+            // 管理データからクリーンアップ
+            temporaryBlockTypes.remove(loc);
+            activeDamageStages.remove(loc);
+            occupiedBlocks.remove(loc);
             if (activeBlocks.containsKey(loc)) {
-                // ドロップを無効にして破壊
-                event.setDropItems(false);
-                // タスクをキャンセルしてから削除
                 Bukkit.getScheduler().cancelTask(activeBlocks.get(loc));
                 activeBlocks.remove(loc);
-                // ひびのパケットをリセット
-                event.getBlock().getWorld().getPlayers()
-                        .forEach(p -> p.sendBlockDamage(event.getBlock().getLocation(), 0.0f));
             }
         }
+    }
+
+    // --- エンチャントモブ討伐報酬 ---
+    @EventHandler
+    public void onEnchantedMobDeath(org.bukkit.event.entity.EntityDeathEvent event) {
+        LivingEntity entity = event.getEntity();
+        if (!isEnchanted(entity))
+            return;
+
+        // XP倍率
+        event.setDroppedExp((int) (event.getDroppedExp() * rewardXpMultiplier));
+
+        // ドロップアイテム数の倍増 (武器・防具などのスタック不可アイテムは除外)
+        for (ItemStack drop : event.getDrops()) {
+            if (drop.getMaxStackSize() > 1) {
+                int newAmount = (int) Math.ceil(drop.getAmount() * rewardDropMultiplier);
+                drop.setAmount(Math.min(newAmount, drop.getMaxStackSize()));
+            }
+        }
+
+        // レアドロップ率増加 (仮想Lootingボーナスで追加ドロップを抽選)
+        if (rewardLootingBonus > 0 && entity.getKiller() != null) {
+            Player killer = entity.getKiller();
+            ItemStack weapon = killer.getInventory().getItemInMainHand();
+            int existingLooting = weapon.getEnchantmentLevel(org.bukkit.enchantments.Enchantment.LOOTING);
+            // ボーナス分だけ追加ドロップの確率を上げる（各ドロップに対して追加抽選）
+            java.util.List<ItemStack> bonusDrops = new java.util.ArrayList<>();
+            for (ItemStack drop : event.getDrops()) {
+                for (int i = 0; i < rewardLootingBonus; i++) {
+                    if (random.nextDouble() < 0.5) { // 50%の確率でボーナスドロップ
+                        bonusDrops.add(drop.clone());
+                    }
+                }
+            }
+            for (ItemStack bonus : bonusDrops) {
+                bonus.setAmount(1);
+                event.getDrops().add(bonus);
+            }
+        }
+
+        // 超低確率(0.001%)で「Perfect potion」をドロップ
+        if (random.nextDouble() < 0.00001) {
+            event.getDrops().add(createPerfectPotion());
+            debugLog("超低確率でPerfect Potionがドロップしました！");
+        }
+
+        debugLog("エンチャントモブ討伐報酬適用: XP=" + event.getDroppedExp() + ", ドロップ数=" + event.getDrops().size());
+    }
+
+    private ItemStack createPerfectPotion() {
+        ItemStack potion = new ItemStack(Material.POTION);
+        org.bukkit.inventory.meta.PotionMeta meta = (org.bukkit.inventory.meta.PotionMeta) potion.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(ChatColor.LIGHT_PURPLE + "Perfect potion");
+            meta.setLore(java.util.Collections.singletonList(ChatColor.GRAY + "Oh...! my gosh..."));
+            meta.setColor(org.bukkit.Color.fromRGB(7536895));
+
+            meta.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SPEED, 18000, 1),
+                    true);
+            meta.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.HASTE, 18000, 2),
+                    true);
+            meta.addCustomEffect(
+                    new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.STRENGTH, 12000, 2), true);
+            meta.addCustomEffect(
+                    new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.INSTANT_HEALTH, 20, 4), true);
+            meta.addCustomEffect(
+                    new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.REGENERATION, 3000, 2), true);
+            meta.addCustomEffect(
+                    new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.RESISTANCE, 12000, 2), true);
+            meta.addCustomEffect(
+                    new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.FIRE_RESISTANCE, 18000, 0),
+                    true);
+            meta.addCustomEffect(
+                    new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.WATER_BREATHING, 12000, 0),
+                    true);
+            meta.addCustomEffect(
+                    new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.NIGHT_VISION, 18000, 0),
+                    true);
+            meta.addCustomEffect(
+                    new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.HEALTH_BOOST, 12000, 14),
+                    true);
+            meta.addCustomEffect(
+                    new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.ABSORPTION, 18000, 4), true);
+            meta.addCustomEffect(
+                    new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.GLOWING, 18000, 0), true);
+            meta.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.LUCK, 6000, 4),
+                    true);
+            meta.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.DARKNESS, 60, 0),
+                    true);
+
+            try {
+                // APIに存在する場合はRarityも設定する
+                meta.setRarity(org.bukkit.inventory.ItemRarity.EPIC);
+            } catch (Throwable ignored) {
+            }
+
+            potion.setItemMeta(meta);
+        }
+        return potion;
     }
 
     // --- 11. 装備拾得AI (全モンスター対象) ---

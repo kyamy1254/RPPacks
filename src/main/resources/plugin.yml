@@ -1,10 +1,15 @@
 name: RPPacks
-version: 1.1.2
+version: 1.2.2
 main: net.akabox.rascraft.RascraftPluginPacks # ★ パッケージ名とメインクラス名を完全指定
 api-version: 1.21.8 # ターゲットとするMinecraftのメジャーバージョンに合わせることを推奨
 author: Kyamy
 description: Made for RAScraft. RAScraft Original Packs.
+depend: [Vault]
 commands:
+  netshop:
+    description: ネットショップを開くコマンド
+    usage: /netshop
+    aliases: [ ns ]
   rppacks:
     description: Rascraft Plugin Packsの管理コマンド
     usage: /rasplugin <機能> <アクション>

@@ -164,6 +164,14 @@ sounds:
       name: "block.note_block.iron_xylophone"
       volume: 1.0
       pitch: 0.75
+    netshop-sell:                 # NetShopで出品した時
+      name: ENTITY_PLAYER_LEVELUP
+      volume: 1.0
+      pitch: 1.0
+    netshop-buy:                  # NetShopで購入した時
+      name: ENTITY_EXPERIENCE_ORB_PICKUP
+      volume: 1.0
+      pitch: 1.0
 
 # ================================================================
 # セクション 2: エンティティ / モブ機能
@@ -332,6 +340,12 @@ enchanted-mobs:
     scan-range: 5                 # スキャン範囲（ブロック）
     scan-height: 3                # スキャン高さ
     task-interval: 20             # タスク周期（ティック）
+
+  # ===== 討伐報酬 =====
+  rewards:
+    xp-multiplier: 3.0            # ドロップ経験値の倍率
+    drop-multiplier: 2.0          # ドロップアイテム数の倍率
+    looting-bonus: 2              # 仮想Lootingレベル加算（レアドロップ率増加）
 
 # ================================================================
 # セクション 3: 拡張機能（プレイヤー/エンティティ）
