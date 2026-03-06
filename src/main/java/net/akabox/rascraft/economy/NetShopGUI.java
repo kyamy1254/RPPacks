@@ -470,7 +470,7 @@ public class NetShopGUI implements Listener {
         // 出品メニュー
         else if (title.equals(SELL_TITLE)) {
             // プレイヤーのインベントリ(下部)のクリックは許可
-            if (event.getRawSlot() >= 54) {
+            if (event.getClickedInventory() != event.getView().getTopInventory()) {
                 // Shiftクリックなどでの上部への移動は、特定スロット(13)以外はキャンセルしたいが
                 // 実装を簡単にするために上部へのShiftクリックは全面禁止にして手置きのみ許可する
                 if (event.isShiftClick()) {

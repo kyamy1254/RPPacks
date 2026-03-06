@@ -1,0 +1,303 @@
+# 例）/menu コマンドで開くサーバー・メニュー
+menu:
+  home:
+    title: "ホーム"
+    size: 54
+    menu-type: normal
+    items:
+      tpa:
+        material: "ENDER_PEARL"
+        display-name: "ᴛᴘᴀ ʀᴇǫᴜᴇꜱᴛ"
+        display-name-color: "purple"
+        lore:
+          - "他のプレイヤーにテレポートします"
+        slot: 10
+        type: "trigger"
+        action: 
+          open_menu: "tpa"
+          play_sound: "block.note_block.pling"   
+      netshop:
+        material: "BUNDLE"
+        display-name: "ɴᴇᴛꜱʜᴏᴘ"
+        display-name-color: "purple"
+        lore:
+          - "ネットショップを開きます"
+        slot: 12
+        type: "command"
+        commands:
+          - "netshop"
+        action: 
+          play_sound: "block.note_block.pling"   
+      warp:
+        material: "COMPASS"
+        display-name: "ᴡᴀʀᴘ"
+        display-name-color: "purple"
+        lore:
+          - "指定の場所にテレポートします"
+        slot: 14
+        type: "trigger"
+        action: 
+          open_menu: "warp"
+          play_sound: "block.note_block.pling"  
+      trail:
+        material: "NETHERITE_BOOTS"
+        display-name: "ᴛʀᴀɪʟ"
+        display-name-color: "purple"
+        lore:
+          - "足跡エフェクトを変更します"
+        slot: 16
+        type: "command"
+        commands:
+          - "rpp trail"
+        action: 
+          play_sound: "block.note_block.pling"  
+      bed:
+        material: "BED"
+        display-name: "ʙᴇᴅ"
+        display-name-color: "purple"
+        lore:
+          - "ベッドにテレポートします"
+        slot: 19
+        type: "command"
+        commands:
+          - "home bed"
+        action: 
+          play_sound: "block.note_block.pling"
+      map:
+        material: "FILLED_MAP"
+        display-name: "ᴍᴀᴘ"
+        display-name-color: "purple"
+        lore:
+          - "マップのリンクを表示します"
+        slot: 21
+        type: "command"
+        commands:
+          - "map link"
+        action: 
+          play_sound: "block.note_block.pling"  
+      settings:
+        material: "REDSTONE_TORCH"
+        display-name: "ᴍᴇɴᴜ ꜱᴇᴛᴛɪɴɢꜱ"
+        display-name-color: "purple"
+        lore:
+          - "メニューの表示設定を変更します"
+        slot: 43
+        type: "trigger"
+        action:
+          open_menu: "settings"
+          play_sound: "block.note_block.pling" 
+  tpa:
+    title: "テレポート申請先プレイヤー選択"
+    size: 54
+    menu-type: player
+    items:
+      template:
+        material: "PLAYER_HEAD"
+        display-name: "%player%にテレポートを申請する"
+        lore:
+          - "相手にTPA REQUESTを送信します"
+        type: "command"
+        commands:
+          - "tpa %player%"
+        action:
+          play_sound: "block.note_block.pling"
+      back:
+        material: "BARRIER"
+        display-name: "戻る"
+        slot: 45
+        type: "trigger"
+        action:
+          open_menu: "home"
+          play_sound: "block.note_block.pling"
+  warp:
+    title: "テレポート先選択"
+    size: 27
+    menu-type: normal
+    items:
+      spawn:
+        material: "GRASS_BLOCK"
+        display-name: "ꜱᴘᴀᴡɴ"
+        lore:
+          - "スポーンにテレポートします"
+        slot: 11
+        type: "command"
+        commands:
+          - "warp spawn"
+        action: 
+          play_sound: "block.note_block.pling"     
+      trap:
+        material: "COBWEB"
+        display-name: "ᴛʀᴀᴘ"
+        lore:
+          - "トラップにテレポートします"
+        slot: 15
+        commands:
+          - "warp trap"
+        action: 
+          play_sound: "block.note_block.pling"
+      back:
+        material: "BARRIER"
+        display-name: "ʙᴀᴄᴋ"
+        slot: 45
+        type: "trigger"
+        action:
+          open_menu: "home"
+          play_sound: "block.note_block.pling"
+
+  settings:
+    title: "メニュー設定"
+    size: 27
+    menu-type: normal
+    items:
+      bg:
+        material: "LIGHT_GRAY_STAINED_GLASS"
+        display-name: "&b背景色を変更する"
+        lore:
+          - "&7メニューの背景色を変更します"
+        slot: 11
+        type: "trigger"
+        action:
+          open_menu: "settings_bg"
+          play_sound: "ui.button.click"
+      actionbar:
+        material: "CYAN_STAINED_GLASS"
+        display-name: "&bアクションバーの色を変更する"
+        lore:
+          - "&7メニュー下段のアクションバー色を変更します"
+        slot: 15
+        type: "trigger"
+        action:
+          open_menu: "settings_action"
+          play_sound: "ui.button.click"
+      back:
+        material: "BARRIER"
+        display-name: "ʙᴀᴄᴋ"
+        slot: 45
+        type: "trigger"
+        action:
+          open_menu: "home"
+          play_sound: "block.note_block.pling"
+  settings_bg:
+    title: "背景色を選択"
+    size: 27
+    menu-type: normal
+    items:
+      c1:
+        material: "LIGHT_GRAY_STAINED_GLASS_PANE"
+        display-name: "&f薄灰色 (デフォルト)"
+        slot: 10
+        type: "command"
+        commands:
+          - "menu setbg LIGHT_GRAY_STAINED_GLASS_PANE"
+      c2:
+        material: "WHITE_STAINED_GLASS_PANE"
+        display-name: "&f白色"
+        slot: 11
+        type: "command"
+        commands:
+          - "menu setbg WHITE_STAINED_GLASS_PANE"
+      c3:
+        material: "BLACK_STAINED_GLASS_PANE"
+        display-name: "&0黒色"
+        slot: 12
+        type: "command"
+        commands:
+          - "menu setbg BLACK_STAINED_GLASS_PANE"
+      c4:
+        material: "BLUE_STAINED_GLASS_PANE"
+        display-name: "&1青色"
+        slot: 13
+        type: "command"
+        commands:
+          - "menu setbg BLUE_STAINED_GLASS_PANE"
+      c5:
+        material: "RED_STAINED_GLASS_PANE"
+        display-name: "&c赤色"
+        slot: 14
+        type: "command"
+        commands:
+          - "menu setbg RED_STAINED_GLASS_PANE"
+      c6:
+        material: "YELLOW_STAINED_GLASS_PANE"
+        display-name: "&e黄色"
+        slot: 15
+        type: "command"
+        commands:
+          - "menu setbg YELLOW_STAINED_GLASS_PANE"
+      c7:
+        material: "LIME_STAINED_GLASS_PANE"
+        display-name: "&a黄緑色"
+        slot: 16
+        type: "command"
+        commands:
+          - "menu setbg LIME_STAINED_GLASS_PANE"
+      back:
+        material: "BARRIER"
+        display-name: "戻る"
+        slot: 45
+        type: "trigger"
+        action:
+          open_menu: "home"
+          play_sound: "block.note_block.pling"
+  settings_action:
+    title: "アクションバーの色を選択"
+    size: 27
+    menu-type: normal
+    items:
+      c1:
+        material: "CYAN_STAINED_GLASS_PANE"
+        display-name: "&3シアン (デフォルト)"
+        slot: 10
+        type: "command"
+        commands:
+          - "menu setaction CYAN_STAINED_GLASS_PANE"
+      c2:
+        material: "MAGENTA_STAINED_GLASS_PANE"
+        display-name: "&dマゼンタ"
+        slot: 11
+        type: "command"
+        commands:
+          - "menu setaction MAGENTA_STAINED_GLASS_PANE"
+      c3:
+        material: "ORANGE_STAINED_GLASS_PANE"
+        display-name: "&6オレンジ"
+        slot: 12
+        type: "command"
+        commands:
+          - "menu setaction ORANGE_STAINED_GLASS_PANE"
+      c4:
+        material: "LIGHT_BLUE_STAINED_GLASS_PANE"
+        display-name: "&b空色"
+        slot: 13
+        type: "command"
+        commands:
+          - "menu setaction LIGHT_BLUE_STAINED_GLASS_PANE"
+      c5:
+        material: "PINK_STAINED_GLASS_PANE"
+        display-name: "&dピンク"
+        slot: 14
+        type: "command"
+        commands:
+          - "menu setaction PINK_STAINED_GLASS_PANE"
+      c6:
+        material: "PURPLE_STAINED_GLASS_PANE"
+        display-name: "&5紫色"
+        slot: 15
+        type: "command"
+        commands:
+          - "menu setaction PURPLE_STAINED_GLASS_PANE"
+      c7:
+        material: "BROWN_STAINED_GLASS_PANE"
+        display-name: "&6茶色"
+        slot: 16
+        type: "command"
+        commands:
+          - "menu setaction BROWN_STAINED_GLASS_PANE"
+      back:
+        material: "BARRIER"
+        display-name: "ʙᴀᴄᴋ"
+        slot: 45
+        type: "trigger"
+        action:
+          open_menu: "home"
+          play_sound: "block.note_block.pling"

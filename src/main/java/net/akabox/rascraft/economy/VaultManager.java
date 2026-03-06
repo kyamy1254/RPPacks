@@ -44,4 +44,16 @@ public class VaultManager {
             return false;
         return econ.depositPlayer(player, amount).transactionSuccess();
     }
+
+    public double getBalance(OfflinePlayer player) {
+        if (econ == null)
+            return 0.0;
+        return econ.getBalance(player);
+    }
+
+    public String formatCurrency(double amount) {
+        if (econ == null)
+            return String.valueOf(amount);
+        return econ.format(amount);
+    }
 }

@@ -6,6 +6,9 @@ author: Kyamy
 description: Made for RAScraft. RAScraft Original Packs.
 depend: [Vault]
 commands:
+  menu:
+    description: サーバーメニューを開くコマンド
+    usage: /menu [id]
   netshop:
     description: ネットショップを開くコマンド
     usage: /netshop

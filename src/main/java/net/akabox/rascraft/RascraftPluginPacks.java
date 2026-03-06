@@ -15,6 +15,9 @@ import java.util.*;
 import net.akabox.rascraft.economy.NetShopGUI;
 import net.akabox.rascraft.economy.NetShopManager;
 import net.akabox.rascraft.economy.VaultManager;
+import net.akabox.rascraft.menu.MenuGUI;
+import net.akabox.rascraft.menu.MenuManager;
+import net.akabox.rascraft.command.MenuCommand;
 import net.akabox.rascraft.command.NetShopCommand;
 
 public class RascraftPluginPacks extends JavaPlugin {
@@ -44,9 +47,16 @@ public class RascraftPluginPacks extends JavaPlugin {
     private boolean enchantedMobsEnabled;
     private boolean entityHealthEnabled;
 
+    // メニュー色設定用
+    private final Map<UUID, String> playerMenuBgColor = new HashMap<>();
+    private final Map<UUID, String> playerMenuActionColor = new HashMap<>();
+
     private VaultManager vaultManager;
     private NetShopManager netShopManager;
     private NetShopGUI netShopGUI;
+
+    private MenuManager menuManager;
+    private MenuGUI menuGUI;
 
     @Override
     public void onEnable() {
@@ -102,6 +112,12 @@ public class RascraftPluginPacks extends JavaPlugin {
             getCommand("netshop").setExecutor(nsCmd);
             getCommand("netshop").setTabCompleter(nsCmd);
         }
+
+        // サーバーメニューの初期化
+        this.menuManager = new MenuManager(this);
+        this.menuGUI = new MenuGUI(this);
+        getServer().getPluginManager().registerEvents(this.menuGUI, this);
+        getCommand("menu").setExecutor(new MenuCommand(this));
     }
 
     @Override
@@ -243,6 +259,20 @@ public class RascraftPluginPacks extends JavaPlugin {
                 playerSelectedEffect.put(UUID.fromString(uuidStr), section.getString(uuidStr).toUpperCase());
             }
         }
+
+        ConfigurationSection bgSection = playerDataConfig.getConfigurationSection("menu.bg_color");
+        if (bgSection != null) {
+            for (String uuidStr : bgSection.getKeys(false)) {
+                playerMenuBgColor.put(UUID.fromString(uuidStr), bgSection.getString(uuidStr).toUpperCase());
+            }
+        }
+
+        ConfigurationSection actionSection = playerDataConfig.getConfigurationSection("menu.action_color");
+        if (actionSection != null) {
+            for (String uuidStr : actionSection.getKeys(false)) {
+                playerMenuActionColor.put(UUID.fromString(uuidStr), actionSection.getString(uuidStr).toUpperCase());
+            }
+        }
     }
 
     public void savePlayerData() {
@@ -250,6 +280,17 @@ public class RascraftPluginPacks extends JavaPlugin {
         for (Map.Entry<UUID, String> entry : playerSelectedEffect.entrySet()) {
             playerDataConfig.set("trails." + entry.getKey().toString(), entry.getValue());
         }
+
+        playerDataConfig.set("menu.bg_color", null);
+        for (Map.Entry<UUID, String> entry : playerMenuBgColor.entrySet()) {
+            playerDataConfig.set("menu.bg_color." + entry.getKey().toString(), entry.getValue());
+        }
+
+        playerDataConfig.set("menu.action_color", null);
+        for (Map.Entry<UUID, String> entry : playerMenuActionColor.entrySet()) {
+            playerDataConfig.set("menu.action_color." + entry.getKey().toString(), entry.getValue());
+        }
+
         try {
             playerDataConfig.save(playerDataFile);
         } catch (IOException ignored) {
@@ -410,6 +451,30 @@ public class RascraftPluginPacks extends JavaPlugin {
         this.tpEffectEnabled = enabled;
     }
 
+    public String getMenuBgColor(UUID playerUUID) {
+        return playerMenuBgColor.getOrDefault(playerUUID, "LIGHT_GRAY_STAINED_GLASS_PANE");
+    }
+
+    public void setMenuBgColor(UUID playerUUID, String color) {
+        if (color == null) {
+            playerMenuBgColor.remove(playerUUID);
+        } else {
+            playerMenuBgColor.put(playerUUID, color);
+        }
+    }
+
+    public String getMenuActionColor(UUID playerUUID) {
+        return playerMenuActionColor.getOrDefault(playerUUID, "CYAN_STAINED_GLASS_PANE");
+    }
+
+    public void setMenuActionColor(UUID playerUUID, String color) {
+        if (color == null) {
+            playerMenuActionColor.remove(playerUUID);
+        } else {
+            playerMenuActionColor.put(playerUUID, color);
+        }
+    }
+
     public void reloadPlugin() {
         this.isOverridden = false;
         // Ensure default config and resource files exist
@@ -442,6 +507,11 @@ public class RascraftPluginPacks extends JavaPlugin {
 
         // Reload player data as it may have been recreated
         loadPlayerData();
+
+        // Reload menus from menu.yml
+        if (this.menuManager != null) {
+            this.menuManager.loadMenus();
+        }
     }
 
     public double getHealthViewDistance() {
@@ -489,6 +559,14 @@ public class RascraftPluginPacks extends JavaPlugin {
 
     public NetShopGUI getNetShopGUI() {
         return netShopGUI;
+    }
+
+    public MenuManager getMenuManager() {
+        return menuManager;
+    }
+
+    public MenuGUI getMenuGUI() {
+        return menuGUI;
     }
 
     public enum GrowType {
