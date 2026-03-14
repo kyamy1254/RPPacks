@@ -8,84 +8,84 @@ menu:
       tpa:
         material: "ENDER_PEARL"
         display-name: "ᴛᴘᴀ ʀᴇǫᴜᴇꜱᴛ"
-        display-name-color: "purple"
+        display-name-color: "aqua"
         lore:
           - "他のプレイヤーにテレポートします"
         slot: 10
         type: "trigger"
-        action: 
+        action:
           open_menu: "tpa"
-          play_sound: "block.note_block.pling"   
+          play_sound: "block.note_block.pling"
       netshop:
         material: "BUNDLE"
         display-name: "ɴᴇᴛꜱʜᴏᴘ"
-        display-name-color: "purple"
+        display-name-color: "aqua"
         lore:
           - "ネットショップを開きます"
         slot: 12
         type: "command"
         commands:
           - "netshop"
-        action: 
-          play_sound: "block.note_block.pling"   
+        action:
+          play_sound: "block.note_block.pling"
       warp:
         material: "COMPASS"
         display-name: "ᴡᴀʀᴘ"
-        display-name-color: "purple"
+        display-name-color: "aqua"
         lore:
           - "指定の場所にテレポートします"
         slot: 14
         type: "trigger"
-        action: 
+        action:
           open_menu: "warp"
-          play_sound: "block.note_block.pling"  
+          play_sound: "block.note_block.pling"
       trail:
         material: "NETHERITE_BOOTS"
         display-name: "ᴛʀᴀɪʟ"
-        display-name-color: "purple"
+        display-name-color: "aqua"
         lore:
           - "足跡エフェクトを変更します"
         slot: 16
         type: "command"
         commands:
           - "rpp trail"
-        action: 
-          play_sound: "block.note_block.pling"  
+        action:
+          play_sound: "block.note_block.pling"
       bed:
-        material: "BED"
+        material: "RED_BED"
         display-name: "ʙᴇᴅ"
-        display-name-color: "purple"
+        display-name-color: "aqua"
         lore:
           - "ベッドにテレポートします"
         slot: 19
         type: "command"
         commands:
           - "home bed"
-        action: 
+        action:
           play_sound: "block.note_block.pling"
       map:
         material: "FILLED_MAP"
         display-name: "ᴍᴀᴘ"
-        display-name-color: "purple"
+        display-name-color: "aqua"
         lore:
           - "マップのリンクを表示します"
         slot: 21
         type: "command"
         commands:
           - "map link"
-        action: 
-          play_sound: "block.note_block.pling"  
+        action:
+          play_sound: "block.note_block.pling"
       settings:
         material: "REDSTONE_TORCH"
         display-name: "ᴍᴇɴᴜ ꜱᴇᴛᴛɪɴɢꜱ"
-        display-name-color: "purple"
+        display-name-color: "gold"
         lore:
           - "メニューの表示設定を変更します"
         slot: 43
         type: "trigger"
         action:
           open_menu: "settings"
-          play_sound: "block.note_block.pling" 
+          play_sound: "block.note_block.pling"
   tpa:
     title: "テレポート申請先プレイヤー選択"
     size: 54
@@ -102,8 +102,12 @@ menu:
         action:
           play_sound: "block.note_block.pling"
       back:
-        material: "BARRIER"
-        display-name: "戻る"
+        material: "PLAYER_HEAD"
+        texture: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODY1MmUyYjkzNmNhODAyNmJkMjg2NTFkN2M5ZjI4MTlkMmU5MjM2OTc3MzRkMThkZmRiMTM1NTBmOGZkYWQ1ZiJ9fX0="
+        display-name: "ʙᴀᴄᴋ"
+        display-name-color: "red"
+        lore:
+          - "ホームに戻ります"
         slot: 45
         type: "trigger"
         action:
@@ -111,33 +115,76 @@ menu:
           play_sound: "block.note_block.pling"
   warp:
     title: "テレポート先選択"
-    size: 27
+    size: 54
     menu-type: normal
     items:
       spawn:
         material: "GRASS_BLOCK"
         display-name: "ꜱᴘᴀᴡɴ"
+        display-name-color: "aqua"
         lore:
           - "スポーンにテレポートします"
-        slot: 11
+        slot: 10
         type: "command"
         commands:
           - "warp spawn"
-        action: 
-          play_sound: "block.note_block.pling"     
+        action:
+          play_sound: "block.note_block.pling"
       trap:
-        material: "COBWEB"
-        display-name: "ᴛʀᴀᴘ"
+        material: "creeper_head"
+        display-name: "ᴄʀᴇᴇᴘᴇʀ ᴛʀᴀᴘ"
+        display-name-color: "aqua"
         lore:
           - "トラップにテレポートします"
-        slot: 15
+        slot: 12
+        type: "command"
         commands:
           - "warp trap"
-        action: 
+        action:
+          play_sound: "block.note_block.pling"
+      p-trap:
+        material: "ominous_bottle"
+        display-name: "ᴘɪʟʟɪɢᴇʀ ᴛʀᴀᴘ"
+        display-name-color: "aqua"
+        lore:
+          - "トラップにテレポートします"
+        slot: 14
+        type: "command"
+        commands:
+          - "warp p-trap"
+        action:
+          play_sound: "block.note_block.pling"
+      d-trap:
+        material: "trident"
+        display-name: "ᴅʀᴏᴡɴᴇᴅ ᴛʀᴀᴘ"
+        display-name-color: "aqua"
+        lore:
+          - "トラップにテレポートします"
+        slot: 16
+        type: "command"
+        commands:
+          - "warp d-trap"
+        action:
+          play_sound: "block.note_block.pling"
+      goldfarm:
+        material: "gold_ingot"
+        display-name: "ɢᴏʟᴅғᴀʀᴍ"
+        display-name-color: "aqua"
+        lore:
+          - "トラップにテレポートします"
+        slot: 19
+        type: "command"
+        commands:
+          - "warp goldfarm"
+        action:
           play_sound: "block.note_block.pling"
       back:
-        material: "BARRIER"
+        material: "PLAYER_HEAD"
+        texture: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODY1MmUyYjkzNmNhODAyNmJkMjg2NTFkN2M5ZjI4MTlkMmU5MjM2OTc3MzRkMThkZmRiMTM1NTBmOGZkYWQ1ZiJ9fX0="
         display-name: "ʙᴀᴄᴋ"
+        display-name-color: "red"
+        lore:
+          - "ホームに戻ります"
         slot: 45
         type: "trigger"
         action:
@@ -170,8 +217,12 @@ menu:
           open_menu: "settings_action"
           play_sound: "ui.button.click"
       back:
-        material: "BARRIER"
+        material: "PLAYER_HEAD"
+        texture: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODY1MmUyYjkzNmNhODAyNmJkMjg2NTFkN2M5ZjI4MTlkMmU5MjM2OTc3MzRkMThkZmRiMTM1NTBmOGZkYWQ1ZiJ9fX0="
         display-name: "ʙᴀᴄᴋ"
+        display-name-color: "red"
+        lore:
+          - "ホームに戻ります"
         slot: 45
         type: "trigger"
         action:
@@ -232,8 +283,12 @@ menu:
         commands:
           - "menu setbg LIME_STAINED_GLASS_PANE"
       back:
-        material: "BARRIER"
-        display-name: "戻る"
+        material: "PLAYER_HEAD"
+        texture: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODY1MmUyYjkzNmNhODAyNmJkMjg2NTFkN2M5ZjI4MTlkMmU5MjM2OTc3MzRkMThkZmRiMTM1NTBmOGZkYWQ1ZiJ9fX0="
+        display-name: "ʙᴀᴄᴋ"
+        display-name-color: "red"
+        lore:
+          - "ホームに戻ります"
         slot: 45
         type: "trigger"
         action:
@@ -294,8 +349,12 @@ menu:
         commands:
           - "menu setaction BROWN_STAINED_GLASS_PANE"
       back:
-        material: "BARRIER"
+        material: "PLAYER_HEAD"
+        texture: "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODY1MmUyYjkzNmNhODAyNmJkMjg2NTFkN2M5ZjI4MTlkMmU5MjM2OTc3MzRkMThkZmRiMTM1NTBmOGZkYWQ1ZiJ9fX0="
         display-name: "ʙᴀᴄᴋ"
+        display-name-color: "red"
+        lore:
+          - "ホームに戻ります"
         slot: 45
         type: "trigger"
         action:

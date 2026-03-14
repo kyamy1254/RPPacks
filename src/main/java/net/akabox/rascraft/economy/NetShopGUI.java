@@ -221,9 +221,14 @@ public class NetShopGUI implements Listener {
                 ChatColor.GRAY + "アイテムを購入します");
         ItemStack sellBtn = createItem(Material.GOLD_INGOT, ChatColor.GOLD + "アイテムを出品する", ChatColor.GRAY + "手持ちのアイテムを",
                 ChatColor.GRAY + "ネットショップに出品します");
+        ItemStack backBtn = createCustomHead(
+                "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODY1MmUyYjkzNmNhODAyNmJkMjg2NTFkN2M5ZjI4MTlkMmU5MjM2OTc3MzRkMThkZmRiMTM1NTBmOGZkYWQ1ZiJ9fX0=",
+                ChatColor.RED + "ʙᴀᴄᴋ",
+                ChatColor.GRAY + "ホームに戻ります");
 
         gui.setItem(11, buyBtn);
         gui.setItem(15, sellBtn);
+        gui.setItem(18, backBtn); // 左端下にホーム戻るボタン
 
         player.openInventory(gui);
     }
@@ -262,13 +267,17 @@ public class NetShopGUI implements Listener {
             gui.setItem(i, filler);
 
         if (page > 0) {
-            gui.setItem(45, createItem(Material.ARROW, ChatColor.YELLOW + "← 前のページ"));
+            gui.setItem(48, createItem(Material.ARROW, ChatColor.YELLOW + "← 前のページ"));
         }
         if (start + 45 < items.size()) {
-            gui.setItem(53, createItem(Material.ARROW, ChatColor.YELLOW + "次のページ →"));
+            gui.setItem(50, createItem(Material.ARROW, ChatColor.YELLOW + "次のページ →"));
         }
 
-        gui.setItem(48, createItem(Material.BARRIER, ChatColor.RED + "メインメニューに戻る"));
+        gui.setItem(53, createItem(Material.BARRIER, ChatColor.RED + "メインメニューに戻る"));
+        gui.setItem(45, createCustomHead(
+                "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODY1MmUyYjkzNmNhODAyNmJkMjg2NTFkN2M5ZjI4MTlkMmU5MjM2OTc3MzRkMThkZmRiMTM1NTBmOGZkYWQ1ZiJ9fX0=",
+                ChatColor.RED + "ʙᴀᴄᴋ",
+                ChatColor.GRAY + "ホームに戻ります"));
 
         String sortName = switch (sortType) {
             case NEWEST -> "新着順";
@@ -321,6 +330,11 @@ public class NetShopGUI implements Listener {
                 ChatColor.GREEN + "" + ChatColor.BOLD + "【出品する】",
                 ChatColor.GRAY + "左のスロットのアイテムを",
                 ChatColor.GOLD + String.valueOf((int) currentPrice) + "円" + ChatColor.GRAY + " で出品します"));
+                
+        gui.setItem(45, createCustomHead(
+                "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODY1MmUyYjkzNmNhODAyNmJkMjg2NTFkN2M5ZjI4MTlkMmU5MjM2OTc3MzRkMThkZmRiMTM1NTBmOGZkYWQ1ZiJ9fX0=",
+                ChatColor.RED + "ʙᴀᴄᴋ",
+                ChatColor.GRAY + "ホームに戻ります"));
 
         gui.setItem(50, createCustomHead(
                 "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMjc1NDgzNjJhMjRjMGZhODQ1M2U0ZDkzZTY4YzU5NjlkZGJkZTU3YmY2NjY2YzAzMTljMWVkMWU4NGQ4OTA2NSJ9fX0=",
@@ -405,6 +419,11 @@ public class NetShopGUI implements Listener {
                 ChatColor.RED + "" + ChatColor.BOLD + "【戻る】",
                 ChatColor.GRAY + "一覧に戻ります"));
 
+        gui.setItem(18, createCustomHead(
+                "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODY1MmUyYjkzNmNhODAyNmJkMjg2NTFkN2M5ZjI4MTlkMmU5MjM2OTc3MzRkMThkZmRiMTM1NTBmOGZkYWQ1ZiJ9fX0=",
+                ChatColor.RED + "ʙᴀᴄᴋ",
+                ChatColor.GRAY + "ホームに戻ります"));
+
         player.openInventory(gui);
     }
 
@@ -424,6 +443,9 @@ public class NetShopGUI implements Listener {
                 plugin.playConfigSound(player, "page-change");
                 sellPrices.put(player.getUniqueId(), 1000.0); // 初期価格
                 openSellMenu(player);
+            } else if (event.getRawSlot() == 18) {
+                plugin.playConfigSound(player, "page-change");
+                plugin.getMenuGUI().openMenu(player, "home");
             }
         }
         // 購入（一覧）メニュー
@@ -437,14 +459,14 @@ public class NetShopGUI implements Listener {
                     plugin.playConfigSound(player, "page-change");
                     openConfirmMenu(player, itemId);
                 }
-            } else if (slot == 45) {
+            } else if (slot == 48) {
                 int page = buyPages.getOrDefault(player.getUniqueId(), 0);
                 if (page > 0) {
                     buyPages.put(player.getUniqueId(), page - 1);
                     plugin.playConfigSound(player, "page-change");
                     openBuyMenu(player);
                 }
-            } else if (slot == 53) {
+            } else if (slot == 50) {
                 int page = buyPages.getOrDefault(player.getUniqueId(), 0);
                 List<MarketItem> items = plugin.getNetShopManager()
                         .getItems(buySorts.getOrDefault(player.getUniqueId(), NetShopManager.SortType.NEWEST));
@@ -453,9 +475,12 @@ public class NetShopGUI implements Listener {
                     plugin.playConfigSound(player, "page-change");
                     openBuyMenu(player);
                 }
-            } else if (slot == 48) {
+            } else if (slot == 53) {
                 plugin.playConfigSound(player, "page-change");
                 openMainMenu(player);
+            } else if (slot == 45) {
+                plugin.playConfigSound(player, "page-change");
+                plugin.getMenuGUI().openMenu(player, "home");
             } else if (slot == 49) {
                 NetShopManager.SortType current = buySorts.getOrDefault(player.getUniqueId(),
                         NetShopManager.SortType.NEWEST);
@@ -549,6 +574,19 @@ public class NetShopGUI implements Listener {
                 plugin.playConfigSound(player, "page-change");
                 openMainMenu(player);
             }
+            // ホームに戻るボタン
+            else if (slot == 45) {
+                ItemStack sellItem = event.getInventory().getItem(13);
+                if (sellItem != null && sellItem.getType() != Material.AIR) {
+                    HashMap<Integer, ItemStack> drop = player.getInventory().addItem(sellItem);
+                    for (ItemStack d : drop.values()) {
+                        player.getWorld().dropItem(player.getLocation(), d);
+                    }
+                    event.getInventory().setItem(13, null); // Drop once so InventoryCloseEvent doesn't drop again
+                }
+                plugin.playConfigSound(player, "page-change");
+                plugin.getMenuGUI().openMenu(player, "home");
+            }
         }
         // 確認メニュー
         else if (title.equals(CONFIRM_TITLE)) {
@@ -638,6 +676,10 @@ public class NetShopGUI implements Listener {
                 pendingBuys.remove(player.getUniqueId());
                 plugin.playConfigSound(player, "page-change");
                 openBuyMenu(player);
+            } else if (slot == 18) { // ホームに戻る
+                pendingBuys.remove(player.getUniqueId());
+                plugin.playConfigSound(player, "page-change");
+                plugin.getMenuGUI().openMenu(player, "home");
             }
         }
     }

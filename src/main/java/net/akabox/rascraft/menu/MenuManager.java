@@ -77,10 +77,11 @@ public class MenuManager {
 
                     String openMenu = itemConfig.getString("action.open_menu");
                     String playSound = itemConfig.getString("action.play_sound");
+                    String texture = itemConfig.getString("texture");
 
                     MenuItemData itemData = new MenuItemData(
                             itemKey, material, displayName, displayNameColor, lore, slot, type, commands, openMenu,
-                            playSound);
+                            playSound, texture);
                     itemsMap.put(itemKey, itemData);
                 }
             }

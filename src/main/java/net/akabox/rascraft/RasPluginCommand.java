@@ -89,6 +89,11 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
                     handleSpawnEnchanted(sender, args);
                 return true;
             }
+            case "killstreak" -> {
+                if (checkAdmin(sender))
+                    handleKillStreak(sender, args);
+                return true;
+            }
             default -> {
                 sender.sendMessage(ChatColor.RED + "不明なコマンドです。 /" + label + " help を確認してください。");
                 return true;
@@ -308,6 +313,22 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
         });
     }
 
+    // --- キルストリーク コマンド処理 ---
+    private void handleKillStreak(CommandSender sender, String[] args) {
+        if (args.length < 2 || !args[1].equalsIgnoreCase("reset")) {
+            sender.sendMessage(ChatColor.RED + "使用法: /rpp killstreak reset");
+            return;
+        }
+
+        EntityHealthSystem ehs = plugin.getEntityHealthSystem();
+        if (ehs != null) {
+            ehs.resetAllKillStreaks();
+            sender.sendMessage(ChatColor.GREEN + "全プレイヤーのキルストリークをリセットしました。");
+        } else {
+            sender.sendMessage(ChatColor.RED + "EntityHealthSystem が無効です。");
+        }
+    }
+
     @Override
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias,
             String[] args) {
@@ -315,7 +336,8 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
             List<String> subs = new ArrayList<>(Arrays.asList("trail", "help", "version"));
             if (sender.hasPermission("rppacks.admin")) {
                 subs.addAll(
-                        Arrays.asList("status", "reload", "sneakgrow", "tpeffect", "enchantedmobs", "entityhealth"));
+                        Arrays.asList("status", "reload", "sneakgrow", "tpeffect", "enchantedmobs", "entityhealth",
+                                "killstreak"));
             }
             return StringUtil.copyPartialMatches(args[0], subs, new ArrayList<>());
         }
@@ -370,6 +392,10 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
                             Arrays.asList("zombie", "skeleton", "creeper", "spider", "magma"), new ArrayList<>());
                 }
             }
+            if (sub.equals("killstreak")) {
+                if (args.length == 2)
+                    return StringUtil.copyPartialMatches(args[1], Arrays.asList("reset"), new ArrayList<>());
+            }
         }
 
         return Collections.emptyList();
@@ -404,6 +430,23 @@ public class RasPluginCommand implements CommandExecutor, TabCompleter {
         gui.setItem(49, createBtn(Material.BARRIER, plugin.getRawMessage("remove-effect-button")));
         if (list.size() > (page + 1) * slots.length)
             gui.setItem(50, createBtn(Material.ARROW, ChatColor.YELLOW + "次のページ →"));
+            
+        // 戻るボタンの追加 (スロット45)
+        ItemStack backBtn = new ItemStack(Material.PLAYER_HEAD);
+        org.bukkit.inventory.meta.ItemMeta backMeta = backBtn.getItemMeta();
+        if (backMeta != null) {
+            backMeta.setDisplayName(ChatColor.RED + "ʙᴀᴄᴋ");
+            backMeta.setLore(java.util.Arrays.asList(ChatColor.GRAY + "ホームに戻ります"));
+            try {
+                org.bukkit.inventory.meta.SkullMeta skullMeta = (org.bukkit.inventory.meta.SkullMeta) backMeta;
+                com.destroystokyo.paper.profile.PlayerProfile profile = org.bukkit.Bukkit.getServer().createProfile(java.util.UUID.randomUUID());
+                profile.setProperty(new com.destroystokyo.paper.profile.ProfileProperty("textures", "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvODY1MmUyYjkzNmNhODAyNmJkMjg2NTFkN2M5ZjI4MTlkMmU5MjM2OTc3MzRkMThkZmRiMTM1NTBmOGZkYWQ1ZiJ9fX0="));
+                skullMeta.setPlayerProfile(profile);
+            } catch (Exception ignored) {}
+            backBtn.setItemMeta(backMeta);
+        }
+        gui.setItem(45, backBtn);
+
         player.openInventory(gui);
     }
 

@@ -75,9 +75,11 @@ public class MenuGUI implements Listener {
 
         applyDecorations(player, inventory, menuId);
 
+        player.openInventory(inventory);
+        // openInventory の中で以前のインベントリのCloseEventが呼ばれてマップがクリアされるため、
+        // その後に put する必要があります。
         currentMenuMap.put(player.getUniqueId(), menuId);
         currentPageMap.put(player.getUniqueId(), page);
-        player.openInventory(inventory);
     }
 
     public void refreshCurrentMenu(Player player) {
@@ -237,8 +239,9 @@ public class MenuGUI implements Listener {
                 displayName = displayName.replace("%player%", targetName).replace("%tab%", targetName);
             }
             if (displayName != null) {
+                // デフォルトの斜体（Italic）を解除するために &r (RESET) を付与
                 meta.setDisplayName(
-                        ChatColor.translateAlternateColorCodes('&', itemData.getColorPrefix() + displayName));
+                        ChatColor.translateAlternateColorCodes('&', "&r" + itemData.getColorPrefix() + displayName));
             }
 
             if (itemData.getLore() != null && !itemData.getLore().isEmpty()) {
@@ -247,15 +250,26 @@ public class MenuGUI implements Listener {
                     if (targetName != null) {
                         line = line.replace("%player%", targetName).replace("%tab%", targetName);
                     }
-                    lore.add(ChatColor.translateAlternateColorCodes('&', line));
+                    // Loreのデフォルト斜体も解除
+                    lore.add(ChatColor.translateAlternateColorCodes('&', "&r&7" + line));
                 }
                 meta.setLore(lore);
             }
 
-            // PLAYER_HEAD の場合はスキンを適用 (ターゲット名が指定されている場合)
-            if (material == Material.PLAYER_HEAD && targetName != null) {
+            // PLAYER_HEAD の場合はスキンを適用
+            if (material == Material.PLAYER_HEAD) {
                 org.bukkit.inventory.meta.SkullMeta skullMeta = (org.bukkit.inventory.meta.SkullMeta) meta;
-                skullMeta.setOwningPlayer(Bukkit.getOfflinePlayer(targetName));
+                if (targetName != null) {
+                    skullMeta.setOwningPlayer(Bukkit.getOfflinePlayer(targetName));
+                } else if (itemData.getTexture() != null && !itemData.getTexture().isEmpty()) {
+                    try {
+                        com.destroystokyo.paper.profile.PlayerProfile profile = Bukkit.getServer().createProfile(java.util.UUID.randomUUID());
+                        profile.setProperty(new com.destroystokyo.paper.profile.ProfileProperty("textures", itemData.getTexture()));
+                        skullMeta.setPlayerProfile(profile);
+                    } catch (Exception e) {
+                        plugin.getLogger().warning("Failed to apply custom texture to menu item: " + itemData.getKey());
+                    }
+                }
             }
 
             meta.getPersistentDataContainer().set(MENU_ID_KEY, PersistentDataType.STRING, itemData.getKey());
@@ -288,14 +302,14 @@ public class MenuGUI implements Listener {
         confirmInv.setItem(13, createMenuItem(player, itemData, targetName)); // 情報表示用として中央に置く
         confirmInv.setItem(15, cancelItem);
 
+        player.openInventory(confirmInv);
+        // CloseEventによるクリア後にputする
         pendingConfirmMap.put(player.getUniqueId(), itemData);
         if (targetName != null) {
             pendingTargetMap.put(player.getUniqueId(), targetName);
         } else {
             pendingTargetMap.remove(player.getUniqueId());
         }
-
-        player.openInventory(confirmInv);
     }
 
     @EventHandler
@@ -360,11 +374,13 @@ public class MenuGUI implements Listener {
 
             String menuId = currentMenuMap.get(player.getUniqueId());
             int page = currentPageMap.getOrDefault(player.getUniqueId(), 0);
-            if (menuId != null) {
-                openMenu(player, menuId, page);
-            } else {
-                player.closeInventory();
-            }
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (menuId != null) {
+                    openMenu(player, menuId, page);
+                } else {
+                    player.closeInventory();
+                }
+            });
             return;
         }
 
@@ -412,12 +428,12 @@ public class MenuGUI implements Listener {
         if ("trigger".equalsIgnoreCase(type) || "open_menu".equalsIgnoreCase(type)) {
             String nextMenu = itemData.getOpenMenu();
             if (nextMenu != null) {
-                openMenu(player, nextMenu, 0);
+                Bukkit.getScheduler().runTask(plugin, () -> openMenu(player, nextMenu, 0));
             }
         } else if ("command".equalsIgnoreCase(type)) {
-            player.closeInventory();
-            if (itemData.getCommands() != null) {
-                Bukkit.getScheduler().runTask(plugin, () -> {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                player.closeInventory();
+                if (itemData.getCommands() != null) {
                     for (String cmd : itemData.getCommands()) {
                         if (target != null) {
                             cmd = cmd.replace("%player%", target).replace("%tab%", target);
@@ -427,8 +443,8 @@ public class MenuGUI implements Listener {
                         }
                         player.performCommand(cmd);
                     }
-                });
-            }
+                }
+            });
         }
     }
 

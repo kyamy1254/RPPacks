@@ -42,10 +42,17 @@ public class MenuListener implements Listener {
         Material type = clicked.getType();
         String plainName = ChatColor.stripColor(meta.getDisplayName());
 
-        // 装飾アイテムの無視
+        // 装飾アイテムの無視 (ただし "ʙᴀᴄᴋ" はホームに戻るボタンとして処理)
         if (type == Material.GRAY_STAINED_GLASS_PANE || type == Material.CYAN_STAINED_GLASS_PANE
-                || type == Material.PLAYER_HEAD)
+                || type == Material.PLAYER_HEAD) {
+            if (type == Material.PLAYER_HEAD && plainName.equals("ʙᴀᴄᴋ")) {
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    p.closeInventory();
+                    plugin.getMenuGUI().openMenu(p, "home");
+                });
+            }
             return;
+        }
 
         // ページ切り替え
         if (type == Material.ARROW) {
@@ -59,7 +66,7 @@ public class MenuListener implements Listener {
             plugin.setPlayerEffect(p.getUniqueId(), null);
             p.sendMessage(plugin.getMessage("trail-remove"));
             playConfigSound(p, "effect-off");
-            p.closeInventory();
+            Bukkit.getScheduler().runTask(plugin, () -> p.closeInventory());
             return;
         }
 
@@ -79,7 +86,7 @@ public class MenuListener implements Listener {
         plugin.setPlayerEffect(p.getUniqueId(), effectName);
         p.sendMessage(plugin.getMessage("trail-equip").replace("{effect}", effectName));
         playConfigSound(p, "equip-success");
-        p.closeInventory();
+        Bukkit.getScheduler().runTask(plugin, () -> p.closeInventory());
     }
 
     @EventHandler

@@ -14,10 +14,11 @@ public class MenuItemData {
     private final String playSound;
 
     private final String displayNameColor;
+    private final String texture;
 
     public MenuItemData(String key, String material, String displayName, String displayNameColor, List<String> lore,
             int slot, String type,
-            List<String> commands, String openMenu, String playSound) {
+            List<String> commands, String openMenu, String playSound, String texture) {
         this.key = key;
         this.material = material;
         this.displayName = displayName;
@@ -28,6 +29,11 @@ public class MenuItemData {
         this.commands = commands;
         this.openMenu = openMenu;
         this.playSound = playSound;
+        this.texture = texture;
+    }
+
+    public String getTexture() {
+        return texture;
     }
 
     public String getKey() {
