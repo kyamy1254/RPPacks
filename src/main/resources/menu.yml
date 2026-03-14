@@ -75,6 +75,45 @@ menu:
           - "map link"
         action:
           play_sound: "block.note_block.pling"
+      rule:
+        material: "BOOK"
+        display-name: "&cルール"
+        slot: 30
+        type: "message"
+        action:
+          message: "&eルールページ: &bhttps://example.com/rules"
+          play_sound: "block.note_block.pling"
+      discord:
+        material: "PAPER"
+        display-name: "&bDiscord リンク"
+        slot: 32
+        type: "message"
+        messages:
+          - "&e[Discord] 以下のURLから参加してください！"
+          - "&bhttps://discord.gg/example"
+        action:
+          play_sound: "block.note_block.pling"
+      test_toggle_on:
+        material: "LIME_DYE"
+        display-name: "&aトグルテスト: ON (OPのみ)"
+        slot: 34
+        type: "message"
+        action:
+          message: "&aあなたはOPなのでONになっています。"
+          play_sound: "block.note_block.pling"
+        view-requirement:
+          type: "string equals"
+          placeholder: "%player_is_op%"
+          value: "yes"
+        fallback: "test_toggle_off"
+      test_toggle_off:
+        material: "GRAY_DYE"
+        display-name: "&7トグルテスト: OFF (OP以外)"
+        slot: 34
+        type: "message"
+        action:
+          message: "&cあなたはOPではありません。"
+          play_sound: "block.note_block.pling"
       settings:
         material: "REDSTONE_TORCH"
         display-name: "ᴍᴇɴᴜ ꜱᴇᴛᴛɪɴɢꜱ"

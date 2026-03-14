@@ -13,6 +13,8 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
+import me.clip.placeholderapi.PlaceholderAPI;
+import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -157,7 +159,11 @@ public class MenuGUI implements Listener {
             if (slot < 0 || slot >= inventory.getSize())
                 continue;
 
-            ItemStack item = createMenuItem(player, itemData, null);
+            MenuItemData currentItemData = evaluateItem(player, itemData, menuData);
+            if (currentItemData == null)
+                continue;
+
+            ItemStack item = createMenuItem(player, currentItemData, null);
             inventory.setItem(slot, item);
         }
     }
@@ -200,9 +206,15 @@ public class MenuGUI implements Listener {
     private <T> void buildPaginatedMenu(Player player, Inventory inventory, List<T> items,
             java.util.function.Function<T, String> nameExtractor, MenuItemData template, int page) {
         int maxItems = Math.min(items.size() - page * ITEMS_PER_PAGE, ITEMS_PER_PAGE);
+
+        // ※ テンプレートの条件を評価
+        // (複数種類への切り替えはここでは対応せず、単純に表示/非表示とします)
+        MenuItemData evaluatedTemplate = evaluateItem(player, template, plugin.getMenuManager().getMenu(currentMenuMap.get(player.getUniqueId())));
+        if (evaluatedTemplate == null) return;
+
         for (int i = 0; i < maxItems; i++) {
             String targetName = nameExtractor.apply(items.get(page * ITEMS_PER_PAGE + i));
-            ItemStack item = createMenuItem(player, template, targetName);
+            ItemStack item = createMenuItem(player, evaluatedTemplate, targetName);
             inventory.setItem(i, item);
         }
 
@@ -224,6 +236,80 @@ public class MenuGUI implements Listener {
             next.setItemMeta(meta);
             inventory.setItem(size - 1, next);
         }
+    }
+
+    private MenuItemData evaluateItem(Player player, MenuItemData initialData, MenuData menuData) {
+        MenuItemData currentData = initialData;
+        int passLimit = 5; // 無限ループ回避
+        int passes = 0;
+
+        while (currentData != null && currentData.getViewRequirement() != null && passes < passLimit) {
+            MenuItemData.ViewRequirement req = currentData.getViewRequirement();
+            boolean meetsRequirement = checkRequirement(player, req);
+
+            if (meetsRequirement) {
+                break; // 条件を満たした場合、このアイテムで確定
+            } else {
+                // 条件を満たさない場合、fallback を探す
+                String fallbackKey = currentData.getFallbackItemKey();
+                if (fallbackKey != null && menuData != null) {
+                    currentData = menuData.getItems().get(fallbackKey);
+                } else {
+                    currentData = null; // 代替アイテムがなければ非表示
+                }
+            }
+            passes++;
+        }
+        return currentData;
+    }
+
+    private boolean checkRequirement(Player player, MenuItemData.ViewRequirement req) {
+        if (req == null) return true;
+
+        String type = req.type();
+        String placeholder = req.placeholder();
+        String expectedValue = req.value();
+
+        if (type == null || placeholder == null || expectedValue == null) return true;
+
+        String parsedValue = placeholder;
+        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            parsedValue = PlaceholderAPI.setPlaceholders(player, placeholder);
+        }
+
+        return switch (type.toLowerCase()) {
+            case "string equals", "equals" -> parsedValue.equalsIgnoreCase(expectedValue);
+            case "string contains", "contains" -> parsedValue.toLowerCase().contains(expectedValue.toLowerCase());
+            case ">", "greater than" -> {
+                try {
+                    yield Double.parseDouble(parsedValue) > Double.parseDouble(expectedValue);
+                } catch (NumberFormatException e) {
+                    yield false;
+                }
+            }
+            case "<", "less than" -> {
+                try {
+                    yield Double.parseDouble(parsedValue) < Double.parseDouble(expectedValue);
+                } catch (NumberFormatException e) {
+                    yield false;
+                }
+            }
+            case ">=", "greater than or equal to" -> {
+                try {
+                    yield Double.parseDouble(parsedValue) >= Double.parseDouble(expectedValue);
+                } catch (NumberFormatException e) {
+                    yield false;
+                }
+            }
+            case "<=", "less than or equal to" -> {
+                try {
+                    yield Double.parseDouble(parsedValue) <= Double.parseDouble(expectedValue);
+                } catch (NumberFormatException e) {
+                    yield false;
+                }
+            }
+            default -> true; // 未知のタイプはtrueとして扱う
+        };
     }
 
     private ItemStack createMenuItem(Player player, MenuItemData itemData, String targetName) {
@@ -442,6 +528,18 @@ public class MenuGUI implements Listener {
                             cmd = cmd.substring(1);
                         }
                         player.performCommand(cmd);
+                    }
+                }
+            });
+        } else if ("message".equalsIgnoreCase(type)) {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                player.closeInventory();
+                if (itemData.getMessages() != null) {
+                    for (String msg : itemData.getMessages()) {
+                        if (target != null) {
+                            msg = msg.replace("%player%", target).replace("%tab%", target);
+                        }
+                        player.sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', msg));
                     }
                 }
             });

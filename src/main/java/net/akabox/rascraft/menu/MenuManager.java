@@ -75,13 +75,32 @@ public class MenuManager {
                         commands = List.of(itemConfig.getString("action.command"));
                     }
 
+                    // 複数メッセージ・単一メッセージ両対応
+                    List<String> messages = null;
+                    if (itemConfig.isList("messages")) {
+                        messages = itemConfig.getStringList("messages");
+                    } else if (itemConfig.isString("action.message")) {
+                        messages = List.of(itemConfig.getString("action.message"));
+                    }
+
                     String openMenu = itemConfig.getString("action.open_menu");
                     String playSound = itemConfig.getString("action.play_sound");
                     String texture = itemConfig.getString("texture");
 
+                    MenuItemData.ViewRequirement viewRequirement = null;
+                    ConfigurationSection reqConfig = itemConfig.getConfigurationSection("view-requirement");
+                    if (reqConfig != null) {
+                        String reqType = reqConfig.getString("type", "");
+                        String reqPlaceholder = reqConfig.getString("placeholder", "");
+                        String reqValue = reqConfig.getString("value", "");
+                        viewRequirement = new MenuItemData.ViewRequirement(reqType, reqPlaceholder, reqValue);
+                    }
+
+                    String fallbackItemKey = itemConfig.getString("fallback");
+
                     MenuItemData itemData = new MenuItemData(
-                            itemKey, material, displayName, displayNameColor, lore, slot, type, commands, openMenu,
-                            playSound, texture);
+                            itemKey, material, displayName, displayNameColor, lore, slot, type, commands, messages, openMenu,
+                            playSound, texture, viewRequirement, fallbackItemKey);
                     itemsMap.put(itemKey, itemData);
                 }
             }

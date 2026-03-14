@@ -3,6 +3,9 @@ package net.akabox.rascraft.menu;
 import java.util.List;
 
 public class MenuItemData {
+
+    public record ViewRequirement(String type, String placeholder, String value) {}
+
     private final String key;
     private final String material;
     private final String displayName;
@@ -10,15 +13,20 @@ public class MenuItemData {
     private final int slot;
     private final String type;
     private final List<String> commands;
+    private final List<String> messages;
     private final String openMenu;
     private final String playSound;
 
     private final String displayNameColor;
     private final String texture;
 
+    private final ViewRequirement viewRequirement;
+    private final String fallbackItemKey;
+
     public MenuItemData(String key, String material, String displayName, String displayNameColor, List<String> lore,
             int slot, String type,
-            List<String> commands, String openMenu, String playSound, String texture) {
+            List<String> commands, List<String> messages, String openMenu, String playSound, String texture,
+            ViewRequirement viewRequirement, String fallbackItemKey) {
         this.key = key;
         this.material = material;
         this.displayName = displayName;
@@ -27,9 +35,20 @@ public class MenuItemData {
         this.slot = slot;
         this.type = type != null ? type : "none";
         this.commands = commands;
+        this.messages = messages;
         this.openMenu = openMenu;
         this.playSound = playSound;
         this.texture = texture;
+        this.viewRequirement = viewRequirement;
+        this.fallbackItemKey = fallbackItemKey;
+    }
+
+    public ViewRequirement getViewRequirement() {
+        return viewRequirement;
+    }
+
+    public String getFallbackItemKey() {
+        return fallbackItemKey;
     }
 
     public String getTexture() {
@@ -62,6 +81,10 @@ public class MenuItemData {
 
     public List<String> getCommands() {
         return commands;
+    }
+
+    public List<String> getMessages() {
+        return messages;
     }
 
     public String getOpenMenu() {
